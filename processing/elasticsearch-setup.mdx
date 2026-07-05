@@ -1,10 +1,14 @@
 ---
-title: "Elasticsearch 配置：索引模板与集群存储策略"
+title: "Elasticsearch 索引模板、Mapping 与 best_compression"
 sidebarTitle: "Elasticsearch 配置"
-description: "为日志监控平台配置 Elasticsearch 索引模板、字段映射和集群存储策略，优化查询性能与存储成本。"
+description: "为日志监控平台配置 Elasticsearch 7.17/8.x 索引模板、字段映射（Mapping）和集群存储策略，通过合理分片与压缩设置优化查询性能并降低存储成本。"
 ---
 
 Elasticsearch 是日志监控平台的核心存储引擎，负责日志数据的持久化和全文检索。合理配置索引模板（Index Template）和字段映射（Mapping）能够显著提升查询性能并降低存储成本。本文介绍平台中 Elasticsearch 的关键配置方法。
+
+<Note>
+  本文中的 API 示例兼容 **Elasticsearch 7.17** 和 **8.x**。两个版本均支持组合索引模板（`_index_template`）和 ILM 策略。若使用 8.x，默认开启安全认证，请在请求中携带认证凭据。
+</Note>
 
 ## 索引命名规范
 
@@ -128,7 +132,7 @@ GET _cluster/health
 
 ```json 响应示例
 {
-  "cluster_name": "log-platform",
+  "cluster_name": "my-es-cluster",
   "status": "green",
   "number_of_nodes": 6,
   "number_of_data_nodes": 6,

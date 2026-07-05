@@ -1,7 +1,7 @@
 ---
-title: "配置 Filebeat：日志输入、过滤与 Kafka 输出设置"
+title: "配置 Filebeat：日志输入、处理器与 Kafka 输出"
 sidebarTitle: "Filebeat 配置"
-description: "配置 Filebeat 的日志输入路径、多行合并、字段处理器和 Kafka 输出，实现生产级日志采集。"
+description: "配置 Filebeat 的日志输入路径、多行日志合并、字段处理器和 Kafka 输出参数，附完整生产环境 filebeat.yml 示例。"
 ---
 
 Filebeat 的核心配置文件位于 `/etc/filebeat/filebeat.yml`，包含日志输入（Inputs）、处理器（Processors）和输出（Output）三个主要部分。本文介绍各配置项的含义和最佳实践，帮助您根据实际业务需求完成配置。
@@ -34,7 +34,6 @@ filebeat.inputs:
     fields:
       service: payment-service
       env: production
-      team: backend
     fields_under_root: true
     # 排除包含特定内容的行
     exclude_lines: ['^DEBUG']
@@ -105,11 +104,11 @@ processors:
   # 添加主机信息字段
   - add_host_metadata:
       when.not.contains.tags: forwarded
-  # 添加字段
+  # 添加自定义字段（按实际环境填写）
   - add_fields:
       target: ''
       fields:
-        datacenter: beijing-az1
+        datacenter: az1
   # 删除不需要的字段，减少传输数据量
   - drop_fields:
       fields: ["agent.ephemeral_id", "agent.id", "ecs.version"]

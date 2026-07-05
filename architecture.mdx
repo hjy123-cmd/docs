@@ -1,7 +1,7 @@
 ---
-title: "系统架构：日志监控平台四层架构详解"
+title: "系统架构：日志监控平台四层架构与组件交互详解"
 sidebarTitle: "架构概览"
-description: "深入了解日志监控平台的四层架构——采集层、传输层、处理存储层和监控告警层——及各组件的协作关系。"
+description: "深入了解日志监控平台的四层架构设计——日志采集层（Filebeat）、消息缓冲层（Kafka KRaft）、处理存储层（Logstash + Elasticsearch，运行于 Kubernetes）与监控告警层（Prometheus + Grafana）——及各层组件的端口与协作关系。"
 ---
 
 日志监控平台采用分层架构设计，将日志从业务服务器到最终可视化的全链路拆分为四个相互独立、可弹性扩展的层次。了解各层的职责与数据流向，有助于您更高效地配置和排查平台。
@@ -44,7 +44,7 @@ description: "深入了解日志监控平台的四层架构——采集层、传
 
 | 组件 | 职责 |
 |------|------|
-| **内网 DNS / Broker 列表** | 为 Filebeat 提供 Kafka Broker 地址发现 |
+| **Kafka Broker 列表** | Filebeat 通过配置的 Broker 地址列表（TCP :9092）建立连接，支持多 Broker 高可用发现 |
 | **Kafka 集群（KRaft 模式）** | 高可用消息队列，缓冲日志流，保障可靠传输 |
 
 **Kafka KRaft 模式优势：**
@@ -88,8 +88,23 @@ description: "深入了解日志监控平台的四层架构——采集层、传
 
 ## 组件交互关系
 
+下表梳理了各层组件之间的主要数据流与接口协议，帮助您理解请求路径和排查依赖关系。
+
+| 发送方 | 接收方 | 协议 / 端口 | 数据类型 |
+|--------|--------|-------------|----------|
+| Filebeat Agent | Kafka Broker | TCP :9092 | 日志事件（JSON） |
+| Logstash | Kafka Broker | TCP :9092 | 消费日志事件 |
+| Logstash | Elasticsearch | HTTPS REST | 批量写入（Bulk API） |
+| Kibana | Elasticsearch | HTTPS REST | 查询与聚合 |
+| Prometheus | Node Exporter | HTTP :9100 | 系统指标（/metrics） |
+| Prometheus | Kafka Exporter | HTTP :9308 | Kafka 指标（/metrics） |
+| Prometheus | ES Exporter | HTTP :9114 | Elasticsearch 指标（/metrics） |
+| Prometheus | Filebeat Agent | HTTP :5066 | Filebeat 运行指标（/stats） |
+| Grafana | Prometheus | HTTP | PromQL 查询 |
+| Alertmanager | 企业微信 / 邮件 / 短信 | HTTPS Webhook | 告警通知 |
+
 <Info>
-  Kibana 与 Grafana 在可视化职责上互补：Kibana 专注于日志检索与分析，Grafana 专注于基础设施指标监控大屏。
+  Kibana 与 Grafana 在可视化职责上互补：Kibana 专注于日志内容的检索与分析，Grafana 专注于基础设施与平台组件的指标监控大屏。
 </Info>
 
 ## 下一步

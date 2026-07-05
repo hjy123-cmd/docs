@@ -1,7 +1,7 @@
 ---
-title: "Alertmanager 配置：告警路由规则与静默策略"
+title: "Alertmanager 告警路由与分组配置：severity 路由、抑制规则与 Silence API"
 sidebarTitle: "Alertmanager"
-description: "配置 Alertmanager 的告警路由规则、分组策略、抑制规则和静默功能，实现智能告警分发与降噪。"
+description: "配置 Alertmanager 的告警路由规则、分组策略与抑制规则，将 Critical 级别告警路由至企业微信、Warning 路由至邮件，并通过 group_wait、group_interval、repeat_interval 控制通知节奏，利用 API 创建维护静默窗口。"
 ---
 
 Alertmanager 负责接收来自 Prometheus 的告警，按照路由规则将告警分发到企业微信、邮件或短信等通知渠道。合理配置路由规则可以避免告警风暴，确保关键告警及时送达。本文介绍 Alertmanager 的核心配置方法。
@@ -125,6 +125,43 @@ curl -X POST http://alertmanager:9093/api/v2/silences \
     "createdBy": "ops-admin",
     "comment": "Scheduled maintenance"
   }'
+```
+
+### 通过 API 查询和删除静默
+
+```bash
+# 列出所有当前生效的静默规则
+curl http://alertmanager:9093/api/v2/silences
+
+# 删除指定静默（需要静默 ID，从上述列表返回结果中获取）
+curl -X DELETE http://alertmanager:9093/api/v2/silences/<silence-id>
+```
+
+## Alertmanager API 参考
+
+Alertmanager 提供 REST API（`/api/v2`），可用于自动化运维脚本：
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/v2/alerts` | `GET` | 查询当前所有活跃告警列表 |
+| `/api/v2/alerts` | `POST` | 手动推送告警到 Alertmanager（用于测试） |
+| `/api/v2/silences` | `GET` | 列出所有静默规则 |
+| `/api/v2/silences` | `POST` | 创建新的静默规则 |
+| `/api/v2/silences/{id}` | `DELETE` | 删除指定静默规则 |
+| `/api/v2/status` | `GET` | 查询 Alertmanager 集群状态与当前配置 |
+
+```bash
+# 查询当前所有 firing 状态的告警
+curl http://alertmanager:9093/api/v2/alerts?filter=alertstate%3Dfiring
+
+# 手动推送测试告警
+curl -X POST http://alertmanager:9093/api/v2/alerts \
+  -H 'Content-Type: application/json' \
+  -d '[{
+    "labels": {"alertname": "TestAlert", "severity": "warning", "instance": "test-01"},
+    "annotations": {"summary": "手动测试告警", "description": "验证路由和通知渠道是否正常"},
+    "startsAt": "2024-01-15T10:00:00Z"
+  }]'
 ```
 
 ## 查看告警状态

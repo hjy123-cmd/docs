@@ -1,7 +1,7 @@
 ---
 title: "排查指南：日志采集、传输与存储常见问题"
 sidebarTitle: "故障排查"
-description: "排查日志监控平台中 Filebeat 采集中断、Kafka 延迟、Elasticsearch 写入失败和 Kibana 查询异常等常见故障。"
+description: "排查日志监控平台各层故障：Filebeat 采集中断、Kafka 消费延迟、Logstash 异常、Elasticsearch 写入失败与 Kibana 查询问题。"
 ---
 
 本文提供日志监控平台各层组件的常见故障排查方法，帮助您快速定位并解决问题。按照从采集层到存储层的顺序逐步排查，通常能快速找到根本原因。
@@ -37,7 +37,13 @@ sudo systemctl status filebeat
 # 2. 查看最近的 Filebeat 日志（最后 50 行）
 sudo journalctl -u filebeat -n 50 --no-pager
 
-# 3. 检查 Filebeat 指标（confirm 是否有新消息发布）
+# 3. 测试配置文件语法是否正确
+sudo filebeat test config -e
+
+# 4. 测试与 Kafka 的连通性
+sudo filebeat test output -e
+
+# 5. 检查 Filebeat 指标（确认是否有新消息发布到 Kafka）
 curl -s http://localhost:5066/stats | python3 -m json.tool | grep -A3 'output'
 ```
 
@@ -98,6 +104,56 @@ nc -zv kafka-broker1 9092
 sudo journalctl -u filebeat | grep -i 'kafka\|connection\|error'
 ```
 
+## Logstash 相关问题
+
+### Logstash 停止消费或处理速度异常慢
+
+**症状**：Kafka 消费延迟持续增长，但 Logstash 进程仍在运行；或 Elasticsearch 中数据量明显减少。
+
+**排查步骤**：
+
+```bash
+# 1. 检查 Logstash 服务状态
+sudo systemctl status logstash
+
+# 2. 查看 Logstash 最近日志（systemd 环境）
+sudo journalctl -u logstash -n 100 --no-pager
+
+# 3. 检查 Logstash 进程是否存在（容器环境）
+docker ps | grep logstash
+```
+
+**检查 Logstash 节点 API**（Logstash 默认在本机 9600 端口暴露监控 API）：
+
+```bash
+# 查看 Pipeline 吞吐量和队列状态
+curl -s http://localhost:9600/_node/stats/pipelines | python3 -m json.tool
+
+# 重点关注以下字段：
+# events.in       - 已接收的事件数
+# events.out      - 已输出的事件数
+# events.filtered - 已过滤的事件数
+# queue.events    - 队列中积压的事件数
+```
+
+**常见原因和解决方法**：
+
+| 症状 | 原因 | 解决方法 |
+|------|------|----------|
+| `queue.events` 持续增大 | 输出端（ES）写入慢，队列积压 | 检查 ES 集群状态，适当增加 Logstash `workers` 数 |
+| `Failed to execute action` 日志 | Logstash Filter/Output 配置异常 | 检查 Pipeline 配置文件语法和字段映射 |
+| 进程频繁重启 | JVM 内存不足，OOM Kill | 增加 Logstash JVM 堆内存（`jvm.options` 中 `-Xmx`） |
+| 消费者组不存在 | Logstash 未能加入 Kafka 消费者组 | 检查 Kafka 配置（`bootstrap_servers`、`group_id`、`topics`）是否正确 |
+
+### Logstash Pipeline 配置验证
+
+在修改 Logstash Pipeline 配置后，可使用以下命令验证语法：
+
+```bash
+# 验证 Pipeline 配置文件语法（替换为实际配置文件路径）
+sudo /usr/share/logstash/bin/logstash --config.test_and_exit -f /etc/logstash/conf.d/pipeline.conf
+```
+
 ## Elasticsearch 相关问题
 
 ### Kibana 中无数据 / 数据量异常少
@@ -119,8 +175,11 @@ GET _nodes/stats/indices?filter_path=nodes.*.indices.indexing
 **检查 Logstash 日志**：
 
 ```bash
-# 查看 Logstash 错误日志（Kubernetes 环境）
-kubectl logs -n logging deployment/logstash --tail=100 | grep -i 'error\|warn\|exception'
+# 查看 Logstash 错误日志（systemd 环境）
+sudo journalctl -u logstash -n 100 --no-pager | grep -i 'error\|warn\|exception'
+
+# 查看 Logstash 错误日志（容器环境，替换 <container-id> 为实际容器 ID）
+docker logs --tail 100 <container-id> 2>&1 | grep -i 'error\|warn\|exception'
 ```
 
 ### 集群状态为 Yellow 或 Red
@@ -194,14 +253,14 @@ GET logs-*/_search
 # 查看 Alertmanager 日志
 sudo journalctl -u alertmanager -n 100 | grep -i 'error\|failed\|dispatch'
 
-# 查看当前路由状态
-curl http://alertmanager:9093/api/v2/status | python3 -m json.tool
+# 查看当前路由状态（替换 <alertmanager-host> 为实际地址，端口默认 9093）
+curl http://<alertmanager-host>:9093/api/v2/status | python3 -m json.tool
 
 # 查询当前活跃告警
-curl http://alertmanager:9093/api/v2/alerts | python3 -m json.tool
+curl http://<alertmanager-host>:9093/api/v2/alerts | python3 -m json.tool
 ```
 
-检查告警是否被**静默规则**屏蔽：在 Alertmanager Web UI 的 **Silences** 页面确认没有误配的静默规则。
+检查告警是否被**静默规则**屏蔽：在 Alertmanager Web UI（`http://<alertmanager-host>:9093`）的 **Silences** 页面确认没有误配的静默规则。
 
 ### Prometheus 采集目标显示 DOWN
 

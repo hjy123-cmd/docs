@@ -1,7 +1,7 @@
 ---
 title: "Kibana 日志检索：KQL 语法与高级搜索技巧"
 sidebarTitle: "日志检索"
-description: "掌握 Kibana KQL 查询语言，使用字段过滤、通配符、范围查询和布尔运算符高效检索目标日志。"
+description: "掌握 Kibana KQL 查询语言的核心语法，学习字段过滤、通配符、范围查询和布尔运算符，快速定位目标日志并保存、分享查询结果。"
 ---
 
 Kibana 的 Discover 功能提供了强大的日志检索能力。通过 KQL（Kibana Query Language），您可以按字段值、关键词、时间范围等多个维度精确定位目标日志。本文介绍 KQL 语法和常用搜索技巧。
@@ -27,84 +27,123 @@ Kibana 的 Discover 功能提供了强大的日志检索能力。通过 KQL（Ki
 
 ### 关键词搜索
 
+搜索包含某个关键词的所有日志：
+
 ```kql
-# 搜索包含关键词的日志
 OrderService
+```
 
-# 搜索包含短语的日志（使用引号）
+使用引号搜索完整短语（顺序严格匹配）：
+
+```kql
 "connection refused"
+```
 
-# 搜索包含多个关键词（默认 AND 逻辑）
+同时包含多个关键词（默认 AND 逻辑，两个词都必须出现）：
+
+```kql
 OrderService timeout
 ```
 
 ### 字段匹配
 
+精确匹配某个字段的值：
+
 ```kql
-# 精确字段值匹配
 service: order-service
+```
 
-# 多值匹配（OR）
+在同一字段中匹配多个值（OR 逻辑）：
+
+```kql
 service: (order-service or payment-api)
+```
 
-# 日志级别过滤
+按日志级别过滤：
+
+```kql
 level: ERROR
+```
 
-# 主机名过滤
+按主机名过滤：
+
+```kql
 host.name: app-server-01
 ```
 
 ### 通配符查询
 
+匹配以某前缀开头的字段值（`*` 匹配零个或多个字符）：
+
 ```kql
-# 以 order 开头的服务
 service: order*
+```
 
-# 包含 service 的字段值
-service: *service*
+文件路径模糊匹配：
 
-# 文件路径模糊匹配
+```kql
 log.file.path: "/var/log/*/app.log"
 ```
 
 <Warning>
-  通配符查询（尤其是 `*` 前缀）在大数据量索引上性能较差，会触发全索引扫描。建议尽量指定精确字段值。
+  **前缀通配符默认禁用**：Kibana 8.x 默认不允许以 `*` 开头的前置通配符查询（如 `service: *service`），因为这会触发全索引扫描，在数据量大时性能极差。如需启用，请在 **Stack Management → 高级设置** 中开启 `query:allowLeadingWildcards` 选项，并谨慎使用。建议优先使用精确字段值或尾部通配符（如 `order*`）。
 </Warning>
 
 ### 范围查询
 
-```kql
-# 数值范围
-response_time > 1000
-response_time >= 500 and response_time <= 2000
+数值范围查询：
 
-# 时间范围（配合时间选择器使用）
+```kql
+response_time > 1000
+```
+
+```kql
+response_time >= 500 and response_time <= 2000
+```
+
+时间范围查询（也可直接使用顶部时间选择器设置）：
+
+```kql
 @timestamp >= "2024-01-15T10:00:00" and @timestamp <= "2024-01-15T11:00:00"
 ```
 
 ### 布尔组合
 
+AND 查询——两个条件同时满足：
+
 ```kql
-# AND 查询
 service: order-service and level: ERROR
+```
 
-# OR 查询
+OR 查询——满足任一条件：
+
+```kql
 level: ERROR or level: FATAL
+```
 
-# NOT 查询
+NOT 查询——排除某个条件：
+
+```kql
 not level: DEBUG
+```
 
-# 复合条件（使用括号分组）
+复合条件——使用括号明确分组优先级：
+
+```kql
 service: order-service and (level: ERROR or level: WARN) and not logger: HealthCheck
 ```
 
 ### 字段存在性检查
 
-```kql
-# 字段存在（非空）
-exception.type: *
+字段存在（有任意索引值，包括空字符串）：
 
-# 字段不存在
+```kql
+exception.type: *
+```
+
+字段不存在：
+
+```kql
 not stack_trace: *
 ```
 

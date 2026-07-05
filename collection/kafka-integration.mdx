@@ -1,7 +1,7 @@
 ---
 title: "Kafka 接入规范：Topic 命名、分区与接入配置"
 sidebarTitle: "Kafka 接入"
-description: "了解日志监控平台 Kafka 集群的 Topic 命名规范、分区策略和 Filebeat 接入要求，确保日志可靠传输。"
+description: "了解日志监控平台 Kafka 集群的 Topic 命名规范、分区策略和 Filebeat 接入配置要求，包含防火墙端口和消息格式说明。"
 ---
 
 Kafka 集群是日志监控平台的消息缓冲层，运行在 KRaft 模式下，解耦 Filebeat（生产者）与 Logstash（消费者），保障日志流量突发时的可靠传输。本文介绍接入 Kafka 所需遵循的规范和配置要求。
@@ -91,7 +91,7 @@ Filebeat 以 JSON 格式发送日志消息，消息结构示例：
   "env": "production",
   "host": {
     "name": "app-server-01",
-    "hostname": "app-server-01.internal"
+    "hostname": "app-server-01"
   },
   "log": {
     "file": {

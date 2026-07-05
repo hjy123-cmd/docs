@@ -1,7 +1,7 @@
 ---
-title: "告警通知渠道：企业微信、邮件与短信配置"
+title: "Alertmanager 三渠道告警通知配置：企业微信 Webhook、SMTP 邮件与短信网关集成"
 sidebarTitle: "通知渠道"
-description: "配置 Alertmanager 的企业微信群机器人、SMTP 邮件和短信告警通知渠道，确保告警信息及时送达。"
+description: "详细配置 Alertmanager 的三类告警通知渠道：企业微信群机器人 Webhook、SMTP 邮件（通过 systemd EnvironmentFile 安全注入密码）和短信 Webhook，并提供将三种渠道合并使用的完整 YAML 配置示例，确保 Critical 告警多通道触达值班人员。"
 ---
 
 日志监控平台支持通过企业微信（群机器人）、邮件（SMTP）和短信三种渠道发送告警通知。本文介绍各渠道的详细配置方法和消息格式自定义方式。
@@ -77,8 +77,36 @@ receivers:
 ```
 
 <Warning>
-  不要将 SMTP 密码明文写入配置文件。使用 `${ENV_VAR}` 语法引用环境变量，在 Alertmanager 的 systemd service 文件中设置 `EnvironmentFile` 加载密码。
+  不要将 SMTP 密码明文写入配置文件。使用 `${ENV_VAR}` 语法引用环境变量，通过 systemd 的 `EnvironmentFile` 在启动时安全注入密码。
 </Warning>
+
+### 通过 systemd EnvironmentFile 注入 SMTP 密码
+
+创建仅 root 可读的环境变量文件：
+
+```bash
+# 创建密码文件（权限设为 600，仅 root 可读）
+sudo bash -c 'echo "SMTP_PASSWORD=your-smtp-password" > /etc/alertmanager/alertmanager.env'
+sudo chmod 600 /etc/alertmanager/alertmanager.env
+sudo chown root:root /etc/alertmanager/alertmanager.env
+```
+
+在 Alertmanager 的 systemd service 文件中引用：
+
+```ini /etc/systemd/system/alertmanager.service
+[Service]
+EnvironmentFile=/etc/alertmanager/alertmanager.env
+ExecStart=/usr/local/bin/alertmanager \
+    --config.file=/etc/alertmanager/alertmanager.yml \
+    --storage.path=/var/lib/alertmanager
+```
+
+修改 service 文件后重新加载 systemd 并重启 Alertmanager：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart alertmanager
+```
 
 ### 邮件接收人配置规范
 

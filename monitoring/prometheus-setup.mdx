@@ -1,7 +1,7 @@
 ---
-title: "Prometheus 监控配置：指标采集与告警规则设置"
+title: "Prometheus 监控配置：采集 Node、Kafka、ES、Filebeat 指标并设置告警规则"
 sidebarTitle: "Prometheus 配置"
-description: "配置 Prometheus 采集日志平台各组件的运行指标，添加告警规则，监控 Filebeat、Kafka、Elasticsearch 和节点健康状态。"
+description: "配置 Prometheus 定时抓取 Node Exporter（:9100）、Kafka Exporter（:9308）、Elasticsearch Exporter（:9114）和 Filebeat（:5066）的运行指标，并通过告警规则实现日志平台全链路健康监控与故障预警。"
 ---
 
 Prometheus 是日志监控平台的指标采集核心，定时从各组件的 Exporter 抓取运行指标，并根据告警规则触发通知。本文介绍如何配置 Prometheus 的抓取目标（Scrape Targets）和常用告警规则（Alerting Rules）。
@@ -180,11 +180,11 @@ groups:
           description: "节点 {{ $labels.instance }} 可用内存低于总内存的 10%，请检查内存使用情况。"
 ```
 
-在 `prometheus.yml` 中引入规则文件：
+在 `prometheus.yml` 顶层添加规则文件引用和 Alertmanager 地址（与 `scrape_configs` 同级）：
 
 ```yaml /etc/prometheus/prometheus.yml
 rule_files:
-  - "rules/*.yml"
+  - "/etc/prometheus/rules/*.yml"
 
 alerting:
   alertmanagers:
@@ -192,6 +192,10 @@ alerting:
         - targets:
             - 'alertmanager:9093'
 ```
+
+<Note>
+  `rule_files` 路径支持 glob 通配符，`/etc/prometheus/rules/*.yml` 会自动加载该目录下所有规则文件。添加新的规则文件后，同样需要执行配置热重载（`POST /-/reload`）。
+</Note>
 
 ## 查询告警状态
 
