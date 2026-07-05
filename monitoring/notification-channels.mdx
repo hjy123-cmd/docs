@@ -1,0 +1,215 @@
+---
+title: "告警通知渠道：企业微信、邮件与短信配置"
+sidebarTitle: "通知渠道"
+description: "配置 Alertmanager 的企业微信群机器人、SMTP 邮件和短信告警通知渠道，确保告警信息及时送达。"
+---
+
+日志监控平台支持通过企业微信（群机器人）、邮件（SMTP）和短信三种渠道发送告警通知。本文介绍各渠道的详细配置方法和消息格式自定义方式。
+
+## 企业微信群机器人
+
+企业微信群机器人是最常用的告警通知渠道，消息实时送达，支持 Markdown 格式。
+
+### 获取 Webhook URL
+
+1. 在企业微信中打开目标群聊
+2. 点击右上角 **...** → **添加群机器人**
+3. 点击 **新创建一个机器人**，输入机器人名称（如：日志平台告警）
+4. 复制生成的 **Webhook URL**
+
+### 配置 Alertmanager Webhook
+
+如果使用自定义 Webhook 转发服务（企业微信机器人 Webhook 不直接兼容 Alertmanager 格式，需要转换服务）：
+
+```yaml /etc/alertmanager/alertmanager.yml
+receivers:
+  - name: 'wechat-ops'
+    webhook_configs:
+      - url: 'http://wechat-webhook-adapter:8080/send'
+        send_resolved: true
+        http_config:
+          bearer_token: 'your-adapter-token'
+```
+
+### Webhook 适配器消息格式
+
+发往企业微信机器人的 Markdown 消息示例：
+
+```markdown 告警消息示例
+## 🚨 [FIRING] Kafka 消费延迟过高
+
+**告警级别**：Warning  
+**触发时间**：2024-01-15 10:30:00  
+**影响范围**：Topic `logs-order-service`  
+**当前延迟**：152,345 条  
+**详情**：消费者组 logstash-consumer-group 消费延迟超过 10 万条，持续 5 分钟。  
+
+[查看 Grafana 大屏](http://grafana.your-domain.com/d/kafka)
+```
+
+## 邮件（SMTP）
+
+### 配置 SMTP 全局设置
+
+```yaml /etc/alertmanager/alertmanager.yml
+global:
+  smtp_smarthost: 'smtp.your-company.com:587'
+  smtp_from: 'alert@your-company.com'
+  smtp_auth_username: 'alert@your-company.com'
+  smtp_auth_password: '${SMTP_PASSWORD}'  # 使用环境变量存储密码
+  smtp_require_tls: true
+
+receivers:
+  - name: 'email-ops'
+    email_configs:
+      - to: 'ops-team@your-company.com,oncall@your-company.com'
+        subject: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          **告警**：{{ .Annotations.summary }}
+          **描述**：{{ .Annotations.description }}
+          **级别**：{{ .Labels.severity }}
+          **开始时间**：{{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        send_resolved: true
+        headers:
+          X-Alert-Source: 'log-platform-prometheus'
+```
+
+<Warning>
+  不要将 SMTP 密码明文写入配置文件。使用 `${ENV_VAR}` 语法引用环境变量，在 Alertmanager 的 systemd service 文件中设置 `EnvironmentFile` 加载密码。
+</Warning>
+
+### 邮件接收人配置规范
+
+| 告警级别 | 收件人 |
+|----------|--------|
+| Critical | 值班工程师个人邮件 + 运维组邮件组 |
+| Warning | 运维组邮件组 |
+| Resolved | 同触发告警的收件人 |
+
+## 短信通知
+
+短信通知通过调用短信服务商 API（或企业内部短信网关）的 Webhook 实现，需要中间转发服务。
+
+### 配置短信 Webhook
+
+```yaml /etc/alertmanager/alertmanager.yml
+receivers:
+  - name: 'sms-oncall'
+    webhook_configs:
+      - url: 'http://sms-gateway:8080/send'
+        send_resolved: false  # 短信通常不发送恢复通知
+        http_config:
+          bearer_token: '${SMS_GATEWAY_TOKEN}'
+        max_alerts: 3  # 短信告警每次最多发送 3 条，避免刷屏
+```
+
+<Note>
+  短信通知适用于 Critical 级别告警，建议与 `repeat_interval: 30m` 配合使用，避免短时间内大量短信打扰值班人员。
+</Note>
+
+## 完整多渠道配置示例
+
+```yaml /etc/alertmanager/alertmanager.yml lines
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.your-company.com:587'
+  smtp_from: 'alert@your-company.com'
+  smtp_auth_username: 'alert@your-company.com'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+
+route:
+  receiver: 'email-ops'
+  group_by: ['alertname', 'env']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-multi-channel'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - match:
+        severity: warning
+      receiver: 'email-ops'
+      repeat_interval: 4h
+
+receivers:
+  - name: 'critical-multi-channel'
+    webhook_configs:
+      - url: 'http://wechat-webhook-adapter:8080/send'
+        send_resolved: true
+      - url: 'http://sms-gateway:8080/send'
+        send_resolved: false
+        max_alerts: 3
+    email_configs:
+      - to: 'oncall@your-company.com'
+        send_resolved: true
+
+  - name: 'email-ops'
+    email_configs:
+      - to: 'ops-team@your-company.com'
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+```
+
+## 验证通知配置
+
+使用 `amtool` 命令行工具测试告警路由：
+
+```bash
+# 测试告警路由（检查 critical 告警会发往哪个 receiver）
+amtool config routes test \
+  --alertmanager.url=http://alertmanager:9093 \
+  severity=critical
+
+# 发送测试告警
+amtool alert add test-alert \
+  --alertmanager.url=http://alertmanager:9093 \
+  severity=warning \
+  alertname=TestAlert
+
+# 查看当前告警
+amtool alert query --alertmanager.url=http://alertmanager:9093
+```
+
+## 常见问题
+
+<Accordion title="企业微信消息未收到">
+  1. 确认 Webhook URL 正确，未过期
+  2. 检查 Alertmanager 日志中是否有 HTTP 请求错误
+  3. 确认告警路由规则匹配到了 wechat receiver
+  4. 企业微信机器人在 1 分钟内消息不超过 20 条，否则会被限流
+</Accordion>
+
+<Accordion title="邮件未收到">
+  1. 检查 SMTP 配置（主机、端口、TLS 设置）
+  2. 确认 SMTP 密码环境变量已正确注入
+  3. 查看 Alertmanager 日志：`journalctl -u alertmanager -n 50`
+  4. 检查邮件是否被归入垃圾邮件
+</Accordion>
+
+<Accordion title="告警恢复通知未发送">
+  确认对应 receiver 配置中 `send_resolved: true`。默认值为 `true`，但短信渠道建议设置为 `false` 避免过多通知。
+</Accordion>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="排查监控问题" icon="wrench" href="/ops/troubleshooting">
+    排查告警不触发、通知延迟等常见问题
+  </Card>
+  <Card title="常见问题" icon="circle-question" href="/ops/faq">
+    查阅平台使用的常见问题解答
+  </Card>
+</CardGroup>

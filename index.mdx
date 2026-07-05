@@ -1,20 +1,62 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "日志监控平台：企业级日志采集、处理与监控一体化解决方案"
+sidebarTitle: "主页"
+description: "日志监控平台基于 ELK + Kafka + Prometheus/Grafana 构建，支持 30+ 业务系统日志统一采集、处理、存储与告警。"
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+日志监控平台 将 Filebeat、Kafka、Logstash、Elasticsearch、Kibana、Prometheus 和 Grafana 整合为一套完整的可观测性解决方案，帮助您从 30 余套业务系统中统一采集、处理和分析日志，并通过多渠道告警及时响应异常。
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="快速入门" icon="rocket" href="/quickstart">
+    五分钟内完成 Filebeat 部署并开始采集日志
+  </Card>
+  <Card title="系统架构" icon="diagram-project" href="/architecture">
+    了解平台四层架构与各组件职责
+  </Card>
+  <Card title="日志采集" icon="magnifying-glass" href="/collection/filebeat-install">
+    在业务服务器上安装并配置 Filebeat Agent
+  </Card>
+  <Card title="监控告警" icon="bell" href="/monitoring/prometheus-setup">
+    配置 Prometheus 指标采集与多渠道告警通知
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## 平台功能
+
+<CardGroup cols={3}>
+  <Card title="日志采集" icon="server">
+    Filebeat Agent 部署在所有业务服务器，自动采集本地日志文件，零侵入、低资源占用。
+  </Card>
+  <Card title="高可用缓冲" icon="layer-group">
+    Kafka 集群（KRaft 模式）作为消息中间件，保障日志流量峰值时的可靠传输与削峰填谷。
+  </Card>
+  <Card title="清洗与脱敏" icon="filter">
+    Logstash 提供灵活的 Pipeline 过滤规则，支持字段提取、格式转换和敏感数据脱敏。
+  </Card>
+  <Card title="弹性存储" icon="database">
+    Elasticsearch 集群实现冷热数据分离，ILM 策略自动管理索引生命周期，降低存储成本。
+  </Card>
+  <Card title="可视化检索" icon="chart-bar">
+    Kibana 提供全文检索、字段过滤和可视化大屏，快速定位和分析业务日志。
+  </Card>
+  <Card title="统一监控" icon="gauge">
+    Prometheus + Grafana 监控所有组件健康状态，Alertmanager 支持企业微信、邮件、短信告警。
+  </Card>
+</CardGroup>
+
+## 快速导航
+
+<Steps>
+  <Step title="部署 Filebeat Agent">
+    按照[安装指南](/collection/filebeat-install)在业务服务器上安装 Filebeat，并完成基础配置。
+  </Step>
+  <Step title="配置日志采集">
+    编辑 [Filebeat 配置文件](/collection/filebeat-config)，指定日志路径并将数据输出到 Kafka。
+  </Step>
+  <Step title="配置 Logstash Pipeline">
+    设置 [Logstash Pipeline](/processing/logstash-pipeline) 进行日志解析、过滤与写入 Elasticsearch。
+  </Step>
+  <Step title="在 Kibana 中查询日志">
+    登录 [Kibana](/visualization/kibana-overview)，使用 Discover 功能检索和分析您的日志数据。
+  </Step>
+</Steps>

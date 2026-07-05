@@ -1,0 +1,224 @@
+---
+title: "Prometheus 监控配置：指标采集与告警规则设置"
+sidebarTitle: "Prometheus 配置"
+description: "配置 Prometheus 采集日志平台各组件的运行指标，添加告警规则，监控 Filebeat、Kafka、Elasticsearch 和节点健康状态。"
+---
+
+Prometheus 是日志监控平台的指标采集核心，定时从各组件的 Exporter 抓取运行指标，并根据告警规则触发通知。本文介绍如何配置 Prometheus 的抓取目标（Scrape Targets）和常用告警规则（Alerting Rules）。
+
+## 监控架构
+
+Prometheus 从以下 Exporter 采集指标：
+
+| Exporter | 端口 | 监控内容 |
+|----------|------|----------|
+| Node Exporter | `:9100` | 服务器 CPU、内存、磁盘、网络 |
+| Kafka Exporter | `:9308` | Kafka 消费延迟、Topic 流量、Broker 状态 |
+| Elasticsearch Exporter | `:9114` | ES 集群健康、索引大小、查询延迟 |
+| Filebeat HTTP Metrics | `:5066` | Filebeat 采集速率、发布成功/失败数 |
+
+## 配置抓取目标
+
+在 Prometheus 配置文件（通常为 `/etc/prometheus/prometheus.yml`）中添加抓取任务：
+
+```yaml /etc/prometheus/prometheus.yml lines
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # 节点监控
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets:
+          - 'app-server-01:9100'
+          - 'app-server-02:9100'
+          - 'app-server-03:9100'
+          # ... 添加所有业务服务器
+        labels:
+          env: 'production'
+
+  # Kafka 监控
+  - job_name: 'kafka-exporter'
+    static_configs:
+      - targets:
+          - 'kafka-broker1:9308'
+          - 'kafka-broker2:9308'
+          - 'kafka-broker3:9308'
+        labels:
+          env: 'production'
+
+  # Elasticsearch 监控
+  - job_name: 'elasticsearch-exporter'
+    static_configs:
+      - targets:
+          - 'es-exporter:9114'
+        labels:
+          env: 'production'
+
+  # Filebeat 监控
+  - job_name: 'filebeat'
+    metrics_path: '/stats'
+    static_configs:
+      - targets:
+          - 'app-server-01:5066'
+          - 'app-server-02:5066'
+          - 'app-server-03:5066'
+        labels:
+          env: 'production'
+```
+
+<Note>
+  修改 `prometheus.yml` 后，向 Prometheus 进程发送 `SIGHUP` 信号或调用 `POST /-/reload` API 使配置热重载，无需重启。
+</Note>
+
+## 验证抓取状态
+
+在 Prometheus Web UI（通常为 `http://prometheus:9090`）中：
+
+1. 点击 **Status** → **Targets**
+2. 确认所有目标状态为 `UP`（绿色）
+3. 若出现 `DOWN`，点击目标查看具体错误信息
+
+或者通过 API 查询：
+
+```bash
+curl http://prometheus:9090/api/v1/targets | python3 -m json.tool | grep -A3 '"health"'
+```
+
+## 关键指标参考
+
+### 节点指标（Node Exporter）
+
+| 指标名称 | 说明 |
+|----------|------|
+| `node_cpu_seconds_total` | CPU 使用时间（区分 user/system/idle） |
+| `node_memory_MemAvailable_bytes` | 可用内存字节数 |
+| `node_filesystem_avail_bytes` | 文件系统可用空间 |
+| `node_load1` | 1 分钟系统负载 |
+| `node_disk_io_time_seconds_total` | 磁盘 IO 时间 |
+
+### Kafka 指标（Kafka Exporter）
+
+| 指标名称 | 说明 |
+|----------|------|
+| `kafka_consumergroup_lag` | 消费者组消费延迟（条数） |
+| `kafka_topic_partition_current_offset` | Topic 分区当前偏移量 |
+| `kafka_brokers` | 活跃 Broker 数量 |
+
+### Elasticsearch 指标（ES Exporter）
+
+| 指标名称 | 说明 |
+|----------|------|
+| `elasticsearch_cluster_health_status` | 集群健康状态（0=green, 1=yellow, 2=red） |
+| `elasticsearch_indices_store_size_bytes_total` | 索引总存储大小 |
+| `elasticsearch_jvm_memory_used_bytes` | JVM 内存使用量 |
+| `elasticsearch_indices_indexing_index_total` | 累计索引写入文档数 |
+
+## 配置告警规则
+
+创建告警规则文件 `/etc/prometheus/rules/logs-platform.yml`：
+
+```yaml /etc/prometheus/rules/logs-platform.yml lines
+groups:
+  - name: log-platform-alerts
+    rules:
+      # Filebeat 停止采集告警
+      - alert: FilebeatDown
+        expr: up{job="filebeat"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Filebeat 服务不可达 ({{ $labels.instance }})"
+          description: "Filebeat 实例 {{ $labels.instance }} 已超过 2 分钟无法采集指标，请检查服务状态。"
+
+      # Kafka 消费延迟过高
+      - alert: KafkaConsumerLagHigh
+        expr: kafka_consumergroup_lag{consumergroup="logstash-consumer-group"} > 100000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka 消费延迟过高 ({{ $labels.topic }})"
+          description: "消费者组 {{ $labels.consumergroup }} 在 Topic {{ $labels.topic }} 的消费延迟超过 10 万条，持续 5 分钟。"
+
+      # Elasticsearch 集群不健康
+      - alert: ElasticsearchClusterRed
+        expr: elasticsearch_cluster_health_status{color="red"} == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elasticsearch 集群状态为 RED"
+          description: "Elasticsearch 集群存在未分配的主分片，数据可能不完整，请立即检查。"
+
+      # 磁盘空间不足
+      - alert: DiskSpaceLow
+        expr: (
+          node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} /
+          node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}
+        ) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘剩余空间不足 15% ({{ $labels.instance }})"
+          description: "节点 {{ $labels.instance }} 根分区可用空间低于 15%，请及时清理或扩容。"
+
+      # 节点内存不足
+      - alert: MemoryAvailableLow
+        expr: (
+          node_memory_MemAvailable_bytes /
+          node_memory_MemTotal_bytes
+        ) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "节点可用内存低于 10% ({{ $labels.instance }})"
+          description: "节点 {{ $labels.instance }} 可用内存低于总内存的 10%，请检查内存使用情况。"
+```
+
+在 `prometheus.yml` 中引入规则文件：
+
+```yaml /etc/prometheus/prometheus.yml
+rule_files:
+  - "rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+```
+
+## 查询告警状态
+
+在 Prometheus Web UI 中：
+- **Alerts** 页面：查看当前触发的告警列表和状态（Pending/Firing）
+- **Graph** 页面：使用 PromQL 查询指标图形
+
+**常用 PromQL 示例：**
+
+```promql
+# 各节点 CPU 使用率
+100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+# Kafka 消费延迟趋势
+kafka_consumergroup_lag{consumergroup="logstash-consumer-group"}
+
+# ES 集群写入速率（每秒文档数）
+rate(elasticsearch_indices_indexing_index_total[5m])
+```
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="Grafana 监控大屏" icon="chart-bar" href="/monitoring/grafana-dashboards">
+    在 Grafana 中可视化 Prometheus 指标
+  </Card>
+  <Card title="配置告警通知" icon="bell" href="/monitoring/alertmanager-config">
+    设置 Alertmanager 告警路由和通知规则
+  </Card>
+</CardGroup>

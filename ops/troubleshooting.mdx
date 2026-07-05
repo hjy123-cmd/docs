@@ -1,0 +1,234 @@
+---
+title: "排查指南：日志采集、传输与存储常见问题"
+sidebarTitle: "故障排查"
+description: "排查日志监控平台中 Filebeat 采集中断、Kafka 延迟、Elasticsearch 写入失败和 Kibana 查询异常等常见故障。"
+---
+
+本文提供日志监控平台各层组件的常见故障排查方法，帮助您快速定位并解决问题。按照从采集层到存储层的顺序逐步排查，通常能快速找到根本原因。
+
+## 排查思路
+
+遇到日志相关问题时，建议按以下顺序排查：
+
+```
+1. 检查 Filebeat 是否正常运行并采集到日志
+      ↓
+2. 检查 Kafka 是否正常接收消息（无连接错误）
+      ↓
+3. 检查 Logstash 是否正常消费并处理日志
+      ↓
+4. 检查 Elasticsearch 写入是否成功
+      ↓
+5. 在 Kibana 中验证数据
+```
+
+## Filebeat 相关问题
+
+### 日志停止采集
+
+**症状**：Kibana 中某服务的日志在某时间点之后不再更新。
+
+**排查步骤**：
+
+```bash
+# 1. 检查 Filebeat 服务状态
+sudo systemctl status filebeat
+
+# 2. 查看最近的 Filebeat 日志（最后 50 行）
+sudo journalctl -u filebeat -n 50 --no-pager
+
+# 3. 检查 Filebeat 指标（confirm 是否有新消息发布）
+curl -s http://localhost:5066/stats | python3 -m json.tool | grep -A3 'output'
+```
+
+**常见原因和解决方法**：
+
+| 症状 | 原因 | 解决方法 |
+|------|------|----------|
+| `Exiting: error loading config file` | 配置文件语法错误 | 运行 `filebeat test config -e` 检查语法 |
+| `Failed to connect to backoff(async(tcp://kafka:9092))` | 无法连接 Kafka | 检查 Kafka 地址和防火墙规则 |
+| `Harvester could not be started` | 日志文件权限问题 | 确认 filebeat 用户有日志文件读权限 |
+| `Registry file corrupt` | 进度文件损坏 | 删除 `/var/lib/filebeat/registry/` 后重启（会重新采集） |
+
+### Filebeat 重复采集
+
+**症状**：Kibana 中出现大量重复日志。
+
+**原因**：进度文件（Registry）被删除或损坏，Filebeat 从头重新读取文件。
+
+**预防措施**：不要手动删除 `/var/lib/filebeat/registry/` 目录；在重启 Filebeat 前先停止服务再操作。
+
+## Kafka 相关问题
+
+### 消费延迟（Consumer Lag）持续增长
+
+**症状**：Grafana 的 Kafka 面板显示消费延迟（Lag）持续增长，超过告警阈值。
+
+**排查步骤**：
+
+```bash
+# 查看消费者组延迟详情
+# 在 Kafka 节点上执行（替换 kafka-broker1 为实际地址）
+/opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server kafka-broker1:9092 \
+  --group logstash-consumer-group \
+  --describe
+```
+
+输出示例：
+
+```
+TOPIC                   PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
+logs-order-service      0          102456          203456          101000
+logs-payment-api        0          55678           55700           22
+```
+
+**解决思路**：
+1. 延迟集中在某几个 Topic → 该 Topic 日志量突增，联系相关应用团队确认
+2. 所有 Topic 均延迟 → Logstash 处理能力不足，联系平台管理员扩容 Worker 数量
+3. Logstash 正常但 ES 写入慢 → ES 集群压力大，检查 ES 状态
+
+### Kafka 连接被拒绝
+
+```bash
+# 测试 Kafka 连通性
+nc -zv kafka-broker1 9092
+
+# 查看 Filebeat 中的 Kafka 错误
+sudo journalctl -u filebeat | grep -i 'kafka\|connection\|error'
+```
+
+## Elasticsearch 相关问题
+
+### Kibana 中无数据 / 数据量异常少
+
+**排查步骤**：
+
+```json 检查索引是否存在
+GET _cat/indices/logs-*?v&s=index
+```
+
+```json 检查今日索引文档数量
+GET logs-*-2024.01.15/_count
+```
+
+```json 检查 Logstash 写入速率（最近 5 分钟）
+GET _nodes/stats/indices?filter_path=nodes.*.indices.indexing
+```
+
+**检查 Logstash 日志**：
+
+```bash
+# 查看 Logstash 错误日志（Kubernetes 环境）
+kubectl logs -n logging deployment/logstash --tail=100 | grep -i 'error\|warn\|exception'
+```
+
+### 集群状态为 Yellow 或 Red
+
+```json 查看未分配分片的原因
+GET _cluster/allocation/explain
+```
+
+```json 查看分片分配详情
+GET _cat/shards?v&h=index,shard,prirep,state,unassigned.reason
+```
+
+**Yellow 状态处理**：通常是副本分片无法分配（节点数不足或磁盘空间不足）。检查：
+- 集群节点数是否满足副本数要求
+- 所有节点磁盘使用率是否低于 85%
+
+**Red 状态处理**：主分片未分配，属于严重故障，请立即联系平台管理员。
+
+### 磁盘空间不足导致索引只读
+
+当某节点磁盘使用率超过 95%，ES 会将该节点的所有索引设为只读，新日志写入失败。
+
+**临时解决（清空磁盘后执行）**：
+
+```json 解除索引只读保护
+PUT _settings
+{
+  "index.blocks.read_only_allow_delete": null
+}
+```
+
+<Warning>
+  执行上述命令前，请先确认磁盘空间已充足（低于 85%），否则写入只会再次触发只读保护。
+</Warning>
+
+## Kibana 相关问题
+
+### 搜索结果为空但确定有数据
+
+1. 确认时间范围覆盖日志的实际时间段
+2. 确认数据视图（Index Pattern）选择正确（如 `logs-*`）
+3. 检查是否有字段过滤器处于激活状态（搜索栏下方的过滤器标签）
+4. 在 Dev Tools 中直接查询确认数据：
+
+```json
+GET logs-*/_search
+{
+  "query": {
+    "range": {
+      "@timestamp": {
+        "gte": "now-15m"
+      }
+    }
+  },
+  "size": 5
+}
+```
+
+### 查询速度非常慢
+
+1. 缩小时间范围（避免跨越超过 7 天的冷数据）
+2. 增加过滤条件减少扫描数据量
+3. 避免使用前缀通配符（如 `*keyword`）
+4. 联系平台管理员检查 ES 集群资源使用情况
+
+## 告警相关问题
+
+### 告警触发但未收到通知
+
+```bash
+# 查看 Alertmanager 日志
+sudo journalctl -u alertmanager -n 100 | grep -i 'error\|failed\|dispatch'
+
+# 查看当前路由状态
+curl http://alertmanager:9093/api/v2/status | python3 -m json.tool
+
+# 查询当前活跃告警
+curl http://alertmanager:9093/api/v2/alerts | python3 -m json.tool
+```
+
+检查告警是否被**静默规则**屏蔽：在 Alertmanager Web UI 的 **Silences** 页面确认没有误配的静默规则。
+
+### Prometheus 采集目标显示 DOWN
+
+```bash
+# 手动测试 Exporter 是否可访问
+curl http://target-host:9100/metrics | head -20
+
+# 检查目标节点防火墙规则
+sudo iptables -L -n | grep 9100
+```
+
+## 联系支持
+
+若通过以上排查步骤无法解决问题，请向平台管理员提供以下信息：
+
+1. **问题描述**：具体现象、发生时间、影响范围
+2. **相关日志**：Filebeat、Logstash、Elasticsearch 的错误日志片段
+3. **Prometheus 截图**：Grafana 相关面板的截图和时间范围
+4. **已尝试的排查步骤**：已执行的操作和结果
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="常见问题 FAQ" icon="circle-question" href="/ops/faq">
+    查阅平台使用的高频问题解答
+  </Card>
+  <Card title="Filebeat 配置参考" icon="gear" href="/collection/filebeat-config">
+    重新检查 Filebeat 配置是否正确
+  </Card>
+</CardGroup>

@@ -1,0 +1,168 @@
+---
+title: "Kafka 接入规范：Topic 命名、分区与接入配置"
+sidebarTitle: "Kafka 接入"
+description: "了解日志监控平台 Kafka 集群的 Topic 命名规范、分区策略和 Filebeat 接入要求，确保日志可靠传输。"
+---
+
+Kafka 集群是日志监控平台的消息缓冲层，运行在 KRaft 模式下，解耦 Filebeat（生产者）与 Logstash（消费者），保障日志流量突发时的可靠传输。本文介绍接入 Kafka 所需遵循的规范和配置要求。
+
+## Kafka 集群信息
+
+| 参数 | 说明 |
+|------|------|
+| 协议 | Kafka Protocol over TCP |
+| 端口 | 9092 |
+| 模式 | KRaft（无 ZooKeeper） |
+| Broker 发现 | 内网 DNS 轮询 / 静态 Broker 列表 |
+
+<Note>
+  Kafka Broker 的具体 IP 地址或主机名请向平台管理员获取。建议在 Filebeat 配置中填写所有 Broker 地址，以实现客户端自动故障转移。
+</Note>
+
+## Topic 命名规范
+
+平台使用统一的 Topic 命名规范，Logstash 根据 Topic 名称进行路由和处理：
+
+```
+logs-{service-name}
+```
+
+**示例：**
+
+| 服务名 | Topic 名称 |
+|--------|------------|
+| order-service | `logs-order-service` |
+| payment-api | `logs-payment-api` |
+| nginx | `logs-nginx` |
+| user-service | `logs-user-service` |
+
+<Warning>
+  Topic 名称前缀必须为 `logs-`，否则 Logstash 无法自动订阅和处理该 Topic 的日志数据。
+</Warning>
+
+### Topic 命名规则
+
+- 使用小写字母、数字和连字符（`-`）
+- 不得包含下划线（`_`）、空格或特殊字符
+- 服务名部分不超过 50 个字符
+- 格式：`logs-{team}-{service}` 适用于同名服务跨团队场景
+
+## Filebeat 接入配置
+
+在 Filebeat 的 `output.kafka` 段中使用动态 Topic 映射：
+
+```yaml /etc/filebeat/filebeat.yml
+output.kafka:
+  # 所有已知 Broker（建议填写全部）
+  hosts:
+    - "kafka-broker1:9092"
+    - "kafka-broker2:9092"
+    - "kafka-broker3:9092"
+  # 动态 Topic：根据 service 字段自动路由
+  topic: 'logs-%{[service]}'
+  # 分区策略
+  partition.hash:
+    reachable_only: false
+    hash: ["%{[host.name]}"]
+  required_acks: 1
+  compression: gzip
+  max_message_bytes: 1048576
+  codec.json:
+    pretty: false
+```
+
+### 分区策略说明
+
+| 策略 | 适用场景 |
+|------|----------|
+| `hash`（推荐） | 同一主机的日志路由到同一分区，保证顺序性 |
+| `round_robin` | 负载均衡，不保证顺序 |
+| `random` | 随机分配，最大化并发 |
+
+## 消息格式
+
+Filebeat 以 JSON 格式发送日志消息，消息结构示例：
+
+```json
+{
+  "@timestamp": "2024-01-15T10:30:00.000Z",
+  "message": "2024-01-15 10:30:00.123 INFO  [OrderService] Order created: order_id=12345",
+  "service": "order-service",
+  "env": "production",
+  "host": {
+    "name": "app-server-01",
+    "hostname": "app-server-01.internal"
+  },
+  "log": {
+    "file": {
+      "path": "/var/log/order-service/app.log"
+    }
+  }
+}
+```
+
+## 消息大小限制
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| 单条消息最大大小 | 1 MB | 超出将被截断 |
+| 批量发送大小 | 2048 条/批 | 影响吞吐量和延迟 |
+
+<Tip>
+  对于包含大量堆栈信息的 Java 异常日志，建议在 Filebeat 配置中启用 `multiline` 合并后，单条消息通常不超过 50 KB，远低于 1 MB 限制。
+</Tip>
+
+## 网络要求
+
+- 业务服务器到 Kafka Broker 的 TCP 9092 端口必须可达
+- 建议网络延迟低于 10ms（同机房部署）
+- 防火墙规则需放行源 IP 到 Kafka Broker 的 9092 出站流量
+
+## 验证接入
+
+配置完成后，执行以下步骤验证日志是否成功写入 Kafka：
+
+```bash
+# 1. 检查 Filebeat 输出日志
+sudo journalctl -u filebeat -f | grep -i kafka
+
+# 2. 查看 Filebeat 指标（确认发布成功数量）
+curl http://localhost:5066/stats | python3 -m json.tool | grep -A5 'kafka'
+```
+
+正常情况下，Filebeat 指标中应显示 `write_bytes` 持续增长，`failed_messages` 保持为 0。
+
+## 常见问题
+
+<Accordion title="连接 Kafka 超时或拒绝">
+  1. 确认 Kafka Broker 地址和端口正确
+  2. 检查业务服务器的防火墙规则：`sudo iptables -L -n | grep 9092`
+  3. 测试连通性：`nc -zv kafka-broker1 9092`
+  4. 联系平台管理员确认 Kafka 是否正常运行
+</Accordion>
+
+<Accordion title="Topic 不存在或写入失败">
+  平台 Kafka 集群已启用自动创建 Topic，Filebeat 首次写入时会自动创建对应 Topic。
+  如果写入失败，请确认：
+  1. Topic 名称符合 `logs-{service}` 格式
+  2. `service` 字段已在 Filebeat 的 `fields` 中正确配置
+  3. 查看 Filebeat 错误日志：`sudo journalctl -u filebeat -n 50 --no-pager`
+</Accordion>
+
+<Accordion title="日志延迟过高">
+  当 Kafka 消费延迟（Consumer Lag）持续增大时，通常原因是：
+  1. Logstash 处理能力不足 — 联系平台管理员扩容 Logstash Worker
+  2. Elasticsearch 写入压力过大 — 联系平台管理员优化索引配置
+  3. Filebeat 批量发送参数过小 — 适当增大 `bulk_max_size`
+</Accordion>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="Logstash Pipeline" icon="filter" href="/processing/logstash-pipeline">
+    了解 Logstash 如何消费 Kafka 并处理日志
+  </Card>
+  <Card title="排查采集问题" icon="wrench" href="/ops/troubleshooting">
+    排查 Filebeat 和 Kafka 常见问题
+  </Card>
+</CardGroup>

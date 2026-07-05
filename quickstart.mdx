@@ -1,47 +1,121 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "快速开始：五分钟完成日志采集接入"
+sidebarTitle: "快速开始"
+description: "通过本指南，在五分钟内完成 Filebeat 安装、配置并将第一条日志发送到平台，验证端到端采集链路。"
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+本指南帮助您快速完成从业务服务器到日志监控平台的完整接入流程。您将安装 Filebeat Agent，配置日志输出到 Kafka，并在 Kibana 中验证日志已成功采集。整个过程预计需要 5 分钟。
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+<Note>
+  开始之前，请确认您拥有业务服务器的 SSH 访问权限，以及 Kibana 的登录账号。
+</Note>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="安装 Filebeat">
+    在业务服务器上以 root 权限执行以下命令安装 Filebeat：
+
+    <CodeGroup>
+
+    ```bash RPM (RHEL/CentOS)
+    # 下载并安装 Filebeat 8.x
+    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-x86_64.rpm
+    sudo rpm -vi filebeat-8.13.0-x86_64.rpm
+    ```
+
+    ```bash DEB (Ubuntu/Debian)
+    # 下载并安装 Filebeat 8.x
+    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-amd64.deb
+    sudo dpkg -i filebeat-8.13.0-amd64.deb
+    ```
+
+    </CodeGroup>
+
+    安装完成后验证版本：
 
     ```bash
-    npm install your-package
+    filebeat version
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="配置 Filebeat 输出到 Kafka">
+    编辑 `/etc/filebeat/filebeat.yml`，配置日志输入和 Kafka 输出：
+
+    ```yaml /etc/filebeat/filebeat.yml
+    filebeat.inputs:
+      - type: log
+        enabled: true
+        paths:
+          - /var/log/your-app/*.log
+        fields:
+          service: your-service-name
+          env: production
+        fields_under_root: true
+        multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+        multiline.negate: true
+        multiline.match: after
+
+    output.kafka:
+      hosts: ["kafka-broker1:9092", "kafka-broker2:9092", "kafka-broker3:9092"]
+      topic: 'logs-%{[service]}'
+      codec.json:
+        pretty: false
+      required_acks: 1
+      compression: gzip
+    ```
+
+    <Tip>
+      将 `your-app` 替换为您的实际应用名称，`your-service-name` 替换为服务标识符，Kafka Broker 地址请咨询平台管理员。
+    </Tip>
+  </Step>
+
+  <Step title="启动 Filebeat 服务">
+    检查配置文件语法并启动服务：
 
     ```bash
-    your-cli init
+    # 验证配置
+    sudo filebeat test config -e
+
+    # 测试 Kafka 连通性
+    sudo filebeat test output -e
+
+    # 启动并设置开机自启
+    sudo systemctl enable filebeat
+    sudo systemctl start filebeat
+
+    # 查看运行状态
+    sudo systemctl status filebeat
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
-    ```
+  <Step title="在 Kibana 中验证日志">
+    登录 Kibana，进入 **Discover** 页面：
+
+    1. 在左上角选择索引模式，例如 `logs-*`
+    2. 将时间范围设置为 **最近 15 分钟**
+    3. 在搜索框输入您的服务名称，例如：`service: your-service-name`
+    4. 确认日志条目出现在列表中
+
+    <Note>
+      如果 15 分钟后仍未看到日志，请参阅[排查 Filebeat 采集问题](/ops/troubleshooting)。
+    </Note>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## 下一步
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+成功接入后，您可以进一步配置平台的各项功能：
+
+<CardGroup cols={2}>
+  <Card title="Filebeat 高级配置" icon="gear" href="/collection/filebeat-config">
+    配置多行日志、字段处理器和 TLS 加密传输
+  </Card>
+  <Card title="Logstash 过滤规则" icon="filter" href="/processing/logstash-pipeline">
+    自定义日志解析和脱敏规则
+  </Card>
+  <Card title="Kibana 日志检索" icon="magnifying-glass" href="/visualization/log-search">
+    学习 KQL 查询语法，高效检索目标日志
+  </Card>
+  <Card title="配置监控告警" icon="bell" href="/monitoring/prometheus-setup">
+    设置关键指标告警，第一时间感知异常
+  </Card>
+</CardGroup>

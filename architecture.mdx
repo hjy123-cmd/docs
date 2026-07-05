@@ -1,0 +1,104 @@
+---
+title: "系统架构：日志监控平台四层架构详解"
+sidebarTitle: "架构概览"
+description: "深入了解日志监控平台的四层架构——采集层、传输层、处理存储层和监控告警层——及各组件的协作关系。"
+---
+
+日志监控平台采用分层架构设计，将日志从业务服务器到最终可视化的全链路拆分为四个相互独立、可弹性扩展的层次。了解各层的职责与数据流向，有助于您更高效地配置和排查平台。
+
+## 架构总览
+
+```
+业务服务器 (30+ 系统)
+      ↓ 本地日志文件
+  Filebeat Agent
+      ↓ TCP :9092
+  Kafka 集群 (KRaft)
+      ↓ 消费
+  Logstash (过滤/脱敏)
+      ↓ 写入
+  Elasticsearch 集群
+      ↓
+  Kibana (查询/可视化)
+
+监控层 (Prometheus → Grafana → Alertmanager → 通知)
+```
+
+## 第一层：日志采集层
+
+日志采集层运行在所有业务 Linux 服务器上，负责实时读取应用程序输出的日志文件。
+
+| 组件 | 职责 |
+|------|------|
+| **业务应用（30+ 系统）** | 将应用日志写入本地文件 |
+| **Filebeat Agent** | 监控日志文件变化，将新增内容采集并转发到 Kafka |
+
+**Filebeat 特性：**
+- 断点续传：记录文件读取进度，重启后自动恢复
+- 背压感知：当下游 Kafka 繁忙时自动降速，不丢数据
+- HTTP Metrics：通过 `:5066` 端口暴露运行指标供 Prometheus 采集
+
+## 第二层：消息缓冲与接入层
+
+消息缓冲层以 Kafka 集群为核心，解耦日志生产端（Filebeat）和消费端（Logstash），实现削峰填谷。
+
+| 组件 | 职责 |
+|------|------|
+| **内网 DNS / Broker 列表** | 为 Filebeat 提供 Kafka Broker 地址发现 |
+| **Kafka 集群（KRaft 模式）** | 高可用消息队列，缓冲日志流，保障可靠传输 |
+
+**Kafka KRaft 模式优势：**
+- 无 ZooKeeper 依赖，架构更简洁
+- 更快的 Broker 启动和 Leader 选举
+- 元数据事务性保障
+
+<Note>
+  Kafka 集群对外提供 TCP 9092 端口，请确保业务服务器到 Kafka Broker 的网络连通性。
+</Note>
+
+## 第三层：日志处理与存储层
+
+处理存储层在 Kubernetes 集群中运行，负责日志的解析、入库和长期存储。
+
+| 组件 | 职责 |
+|------|------|
+| **Logstash** | 从 Kafka 消费日志，执行过滤、字段提取和脱敏，写入 ES |
+| **Elasticsearch 集群** | 日志存储与全文检索引擎 |
+| **ILM 策略** | 自动管理索引冷热分离与数据过期删除 |
+| **Snapshot 快照** | 定时将索引快照备份到 NFS / 对象存储 |
+| **Kibana** | 提供 Web 界面进行日志检索与可视化 |
+
+**数据生命周期：**
+1. **热数据（0–7 天）**：存储在高性能 SSD 节点，支持快速查询
+2. **温数据（7–30 天）**：迁移至普通 HDD 节点，降低存储成本
+3. **冷数据（30 天以上）**：ILM 自动关闭或删除索引，或归档到快照仓库
+
+## 第四层：监控告警层
+
+监控告警层对整个平台的所有组件实施统一的指标采集、可视化和告警。
+
+| 组件 | 监控端口 | 职责 |
+|------|----------|------|
+| **Node Exporter** | :9100 | 采集服务器 CPU、内存、磁盘等系统指标 |
+| **Kafka Exporter** | :9308 | 采集 Kafka 消费延迟、Topic 流量等指标 |
+| **Elasticsearch Exporter** | :9114 | 采集 ES 集群健康、索引大小等指标 |
+| **Prometheus** | — | 定时抓取所有 Exporter 指标并评估告警规则 |
+| **Grafana** | — | 统一监控大屏，可视化所有组件指标 |
+| **Alertmanager** | — | 告警路由与分发，支持企业微信/邮件/短信 |
+
+## 组件交互关系
+
+<Info>
+  Kibana 与 Grafana 在可视化职责上互补：Kibana 专注于日志检索与分析，Grafana 专注于基础设施指标监控大屏。
+</Info>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="安装 Filebeat" icon="download" href="/collection/filebeat-install">
+    在业务服务器上部署 Filebeat Agent
+  </Card>
+  <Card title="配置 Logstash Pipeline" icon="filter" href="/processing/logstash-pipeline">
+    设置日志处理规则与 Elasticsearch 写入
+  </Card>
+</CardGroup>

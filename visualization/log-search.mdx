@@ -1,0 +1,188 @@
+---
+title: "Kibana 日志检索：KQL 语法与高级搜索技巧"
+sidebarTitle: "日志检索"
+description: "掌握 Kibana KQL 查询语言，使用字段过滤、通配符、范围查询和布尔运算符高效检索目标日志。"
+---
+
+Kibana 的 Discover 功能提供了强大的日志检索能力。通过 KQL（Kibana Query Language），您可以按字段值、关键词、时间范围等多个维度精确定位目标日志。本文介绍 KQL 语法和常用搜索技巧。
+
+## 快速开始
+
+<Steps>
+  <Step title="打开 Discover">
+    在 Kibana 左侧导航中点击 **Discover** 图标。
+  </Step>
+  <Step title="选择数据视图">
+    在左上角下拉菜单中选择 `logs-*` 或特定服务的索引模式。
+  </Step>
+  <Step title="设置时间范围">
+    点击右上角时间选择器，选择预设时间范围（如最近 15 分钟）或自定义时间区间。
+  </Step>
+  <Step title="输入查询条件">
+    在顶部搜索框中输入 KQL 查询语句，按 **Enter** 执行搜索。
+  </Step>
+</Steps>
+
+## KQL 基础语法
+
+### 关键词搜索
+
+```kql
+# 搜索包含关键词的日志
+OrderService
+
+# 搜索包含短语的日志（使用引号）
+"connection refused"
+
+# 搜索包含多个关键词（默认 AND 逻辑）
+OrderService timeout
+```
+
+### 字段匹配
+
+```kql
+# 精确字段值匹配
+service: order-service
+
+# 多值匹配（OR）
+service: (order-service or payment-api)
+
+# 日志级别过滤
+level: ERROR
+
+# 主机名过滤
+host.name: app-server-01
+```
+
+### 通配符查询
+
+```kql
+# 以 order 开头的服务
+service: order*
+
+# 包含 service 的字段值
+service: *service*
+
+# 文件路径模糊匹配
+log.file.path: "/var/log/*/app.log"
+```
+
+<Warning>
+  通配符查询（尤其是 `*` 前缀）在大数据量索引上性能较差，会触发全索引扫描。建议尽量指定精确字段值。
+</Warning>
+
+### 范围查询
+
+```kql
+# 数值范围
+response_time > 1000
+response_time >= 500 and response_time <= 2000
+
+# 时间范围（配合时间选择器使用）
+@timestamp >= "2024-01-15T10:00:00" and @timestamp <= "2024-01-15T11:00:00"
+```
+
+### 布尔组合
+
+```kql
+# AND 查询
+service: order-service and level: ERROR
+
+# OR 查询
+level: ERROR or level: FATAL
+
+# NOT 查询
+not level: DEBUG
+
+# 复合条件（使用括号分组）
+service: order-service and (level: ERROR or level: WARN) and not logger: HealthCheck
+```
+
+### 字段存在性检查
+
+```kql
+# 字段存在（非空）
+exception.type: *
+
+# 字段不存在
+not stack_trace: *
+```
+
+## 常用检索场景
+
+<Accordion title="查找某服务最近的错误日志">
+```kql
+service: order-service and level: ERROR
+```
+时间范围选择：最近 1 小时
+</Accordion>
+
+<Accordion title="查找包含特定错误信息的日志">
+```kql
+message: "NullPointerException"
+```
+或使用通配符：
+```kql
+message: *NullPointer*
+```
+</Accordion>
+
+<Accordion title="查找特定主机上的所有错误">
+```kql
+host.name: app-server-03 and level: (ERROR or FATAL)
+```
+</Accordion>
+
+<Accordion title="排查特定时间段的异常">
+在时间选择器中设置绝对时间范围，例如：
+- 开始：`2024-01-15 09:00:00`
+- 结束：`2024-01-15 10:30:00`
+
+配合查询条件：
+```kql
+level: ERROR and service: payment-api
+```
+</Accordion>
+
+<Accordion title="统计各服务错误日志数量">
+在 Discover 中执行以下步骤：
+1. 查询条件：`level: ERROR`
+2. 在左侧字段列表中找到 `service` 字段
+3. 点击 `service` 字段名称查看 **Top values** 分布
+</Accordion>
+
+## 保存和分享查询
+
+### 保存查询
+1. 完成查询配置后，点击搜索栏旁的 **保存**
+2. 输入查询名称（如：`order-service 错误日志`）
+3. 下次使用时点击 **打开** 直接加载
+
+### 分享查询链接
+1. 点击顶部 **Share**
+2. 选择 **Copy link** — 当前查询条件和时间范围会编码到 URL 中
+3. 将链接发送给同事，对方打开后将看到相同的查询视图
+
+<Tip>
+  分享链接中的时间范围默认为绝对时间（固定起止时间），如需分享「最近 1 小时」这样的相对时间视图，需手动勾选 **Use relative dates** 选项。
+</Tip>
+
+## 字段过滤面板
+
+在 Discover 左侧字段列表中，点击任意字段名称可查看该字段的 Top 5 值分布。点击值旁的 **+** 或 **-** 图标可快速添加包含/排除过滤器：
+
+- **+** 添加为包含过滤：等同于 `field: value`
+- **-** 添加为排除过滤：等同于 `not field: value`
+
+所有激活的过滤器显示在搜索栏下方，可随时禁用或删除。
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="构建监控大屏" icon="chart-bar" href="/visualization/dashboards">
+    将查询结果可视化为仪表板图表
+  </Card>
+  <Card title="配置告警通知" icon="bell" href="/monitoring/alertmanager-config">
+    基于日志内容配置自动告警规则
+  </Card>
+</CardGroup>

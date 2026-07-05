@@ -1,0 +1,62 @@
+---
+title: "日志监控平台简介：统一日志可观测性的完整方案"
+sidebarTitle: "简介"
+description: "了解日志监控平台的核心能力、适用场景及关键组件，帮助您快速理解平台价值与使用方式。"
+---
+
+日志监控平台是一套面向企业的日志可观测性解决方案，基于 Filebeat、Kafka、Logstash、Elasticsearch、Kibana、Prometheus 和 Grafana 等开源组件构建，将日志采集、传输、处理、存储、检索与监控告警整合在统一平台中，支持 30 余套业务系统的日志统一管理。
+
+## 核心能力
+
+<CardGroup cols={2}>
+  <Card title="统一采集" icon="download">
+    通过 Filebeat Agent 采集所有业务服务器的应用日志，支持多种日志格式，自动检测文件滚动。
+  </Card>
+  <Card title="可靠传输" icon="arrows-left-right">
+    Kafka 集群提供高吞吐量消息缓冲，在日志流量突发时保障数据不丢失，支持重放消费。
+  </Card>
+  <Card title="灵活处理" icon="sliders">
+    Logstash Pipeline 支持 Grok 解析、字段映射、敏感数据脱敏等丰富的过滤操作。
+  </Card>
+  <Card title="高效存储" icon="hard-drive">
+    Elasticsearch 冷热分离架构和 ILM 策略，在保障查询性能的同时优化存储成本。
+  </Card>
+  <Card title="快速检索" icon="magnifying-glass">
+    Kibana Discover 提供全文检索与 KQL 查询语言，秒级定位目标日志。
+  </Card>
+  <Card title="智能告警" icon="triangle-exclamation">
+    Prometheus + Alertmanager 对组件异常、日志延迟、磁盘空间等关键指标主动告警。
+  </Card>
+</CardGroup>
+
+## 平台组件
+
+| 组件 | 版本 | 职责 |
+|------|------|------|
+| Filebeat | 7.17 / 8.x | 日志采集 Agent，部署在业务服务器 |
+| Kafka | KRaft 模式 | 高可用消息缓冲与传输 |
+| Logstash | 7.17 / 8.x | 日志过滤、解析与脱敏处理 |
+| Elasticsearch | 7.17 / 8.x | 日志存储与全文检索引擎 |
+| Kibana | 7.17 / 8.x | 日志可视化检索平台 |
+| Prometheus | 2.x | 指标采集与告警规则引擎 |
+| Grafana | 9.x+ | 统一监控大屏 |
+| Alertmanager | 0.25+ | 告警路由与通知分发 |
+
+## 适用场景
+
+- **故障排查**：快速全文检索多系统日志，关联分析异常链路
+- **安全审计**：集中存储和检索操作日志，满足合规要求
+- **业务分析**：通过 Kibana 大屏可视化业务关键指标趋势
+- **容量规划**：监控日志量变化趋势，提前预判存储需求
+- **性能监控**：实时监控各组件健康状态，自动触发告警
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="查看系统架构" icon="diagram-project" href="/architecture">
+    深入了解平台四层架构设计与数据流转
+  </Card>
+  <Card title="开始快速部署" icon="rocket" href="/quickstart">
+    按步骤完成第一个 Filebeat Agent 的部署
+  </Card>
+</CardGroup>

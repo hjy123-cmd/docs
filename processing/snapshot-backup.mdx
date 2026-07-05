@@ -1,0 +1,156 @@
+---
+title: "Elasticsearch 快照备份：NFS 与对象存储配置"
+sidebarTitle: "快照备份"
+description: "配置 Elasticsearch 快照仓库，通过定时快照将日志数据备份到 NFS 或对象存储，实现数据灾备与长期归档。"
+---
+
+Elasticsearch 快照（Snapshot）是日志数据灾难备份和长期归档的主要手段。日志监控平台支持将快照存储到 NFS 共享文件系统或对象存储（兼容 S3 协议）。本文介绍如何配置快照仓库和定时快照策略（SLM）。
+
+## 支持的快照存储类型
+
+| 存储类型 | 适用场景 |
+|----------|----------|
+| **NFS 共享存储** | 内网环境，低延迟，需挂载网络文件系统 |
+| **对象存储（S3 兼容）** | 云环境或混合云，高可用，成本低 |
+
+## 配置 NFS 快照仓库
+
+确保 NFS 目录已挂载到所有 Elasticsearch 节点的相同路径，然后在 Kibana Dev Tools 中创建仓库：
+
+```json 创建 NFS 快照仓库
+PUT _snapshot/logs-backup
+{
+  "type": "fs",
+  "settings": {
+    "location": "/mnt/es-snapshots",
+    "compress": true,
+    "max_restore_bytes_per_sec": "200mb",
+    "max_snapshot_bytes_per_sec": "100mb"
+  }
+}
+```
+
+<Note>
+  `/mnt/es-snapshots` 路径必须在所有 ES 节点上挂载同一 NFS 共享，且 Elasticsearch 进程用户（通常是 `elasticsearch`）对该目录有读写权限。
+</Note>
+
+## 配置对象存储快照仓库（S3 兼容）
+
+```json 创建 S3 快照仓库
+PUT _snapshot/logs-backup-s3
+{
+  "type": "s3",
+  "settings": {
+    "bucket": "your-backup-bucket",
+    "region": "cn-north-1",
+    "endpoint": "https://s3.your-storage.com",
+    "base_path": "elasticsearch/logs-backup",
+    "compress": true,
+    "server_side_encryption": false
+  }
+}
+```
+
+## 验证仓库连通性
+
+```json 验证快照仓库
+POST _snapshot/logs-backup/_verify
+```
+
+成功响应示例：
+
+```json
+{
+  "nodes": {
+    "node_id_1": { "name": "es-node1" },
+    "node_id_2": { "name": "es-node2" },
+    "node_id_3": { "name": "es-node3" }
+  }
+}
+```
+
+## 手动创建快照
+
+```json 为所有日志索引创建快照
+PUT _snapshot/logs-backup/snapshot-2024-01-15
+{
+  "indices": "logs-*",
+  "ignore_unavailable": true,
+  "include_global_state": false,
+  "metadata": {
+    "taken_by": "admin",
+    "description": "Daily backup 2024-01-15"
+  }
+}
+```
+
+## 配置自动快照策略（SLM）
+
+使用快照生命周期管理（SLM）配置定时自动备份：
+
+```json 创建每日快照策略
+PUT _slm/policy/daily-logs-backup
+{
+  "name": "<daily-snap-{now/d}>",
+  "schedule": "0 30 1 * * ?",
+  "repository": "logs-backup",
+  "config": {
+    "indices": ["logs-*"],
+    "ignore_unavailable": true,
+    "include_global_state": false
+  },
+  "retention": {
+    "expire_after": "30d",
+    "min_count": 5,
+    "max_count": 50
+  }
+}
+```
+
+**参数说明：**
+- `schedule`：Cron 表达式，`0 30 1 * * ?` 表示每天凌晨 1:30 执行
+- `expire_after`：快照保留时间（30 天后自动删除）
+- `min_count`：无论是否过期，至少保留 5 个快照
+- `max_count`：最多保留 50 个快照
+
+## 查看快照状态
+
+```json 列出所有快照
+GET _snapshot/logs-backup/_all
+```
+
+```json 查看特定快照详情
+GET _snapshot/logs-backup/snapshot-2024-01-15
+```
+
+```json 查看正在进行的快照
+GET _snapshot/_status
+```
+
+## 从快照恢复数据
+
+```json 从快照恢复指定索引
+POST _snapshot/logs-backup/snapshot-2024-01-15/_restore
+{
+  "indices": "logs-order-service-2024.01.15",
+  "ignore_unavailable": true,
+  "include_global_state": false,
+  "rename_pattern": "logs-(.+)",
+  "rename_replacement": "restored-logs-$1"
+}
+```
+
+<Warning>
+  恢复时使用 `rename_replacement` 将索引恢复到新名称，避免覆盖现有索引。恢复大量数据可能需要数小时，期间请勿重启集群。
+</Warning>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="Kibana 可视化" icon="chart-bar" href="/visualization/kibana-overview">
+    使用 Kibana 检索和展示日志数据
+  </Card>
+  <Card title="监控 Elasticsearch" icon="gauge" href="/monitoring/prometheus-setup">
+    通过 Prometheus 监控 ES 集群健康状态
+  </Card>
+</CardGroup>

@@ -1,0 +1,139 @@
+---
+title: "安装 Filebeat Agent：在 Linux 服务器上完成部署"
+sidebarTitle: "安装 Filebeat"
+description: "在 RHEL/CentOS 和 Ubuntu/Debian 服务器上安装 Filebeat 8.x Agent，完成基础环境准备和服务配置。"
+---
+
+Filebeat 是部署在业务服务器上的轻量级日志采集 Agent，负责监控本地日志文件并将数据实时发送到日志监控平台的 Kafka 集群。本文介绍如何在 Linux 服务器上完成 Filebeat 的安装与初始化。
+
+## 系统要求
+
+| 项目 | 要求 |
+|------|------|
+| 操作系统 | RHEL 7/8/9、CentOS 7/8、Ubuntu 18.04/20.04/22.04、Debian 10/11 |
+| CPU | 最低 0.5 核（建议 1 核以上） |
+| 内存 | 最低 256 MB（建议 512 MB 以上） |
+| 磁盘 | 安装包约 80 MB，运行时 Data 目录约 100 MB |
+| 网络 | 可访问 Kafka Broker 的 9092 端口 |
+
+<Note>
+  请向平台管理员确认 Kafka Broker 的 IP 地址或主机名，安装前确保网络连通性。
+</Note>
+
+## 安装步骤
+
+<Steps>
+  <Step title="下载 Filebeat 安装包">
+    根据您的操作系统选择对应的安装包：
+
+    <CodeGroup>
+
+    ```bash RPM (RHEL/CentOS)
+    # Filebeat 8.13.0 RPM 包
+    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-x86_64.rpm
+    ```
+
+    ```bash DEB (Ubuntu/Debian)
+    # Filebeat 8.13.0 DEB 包
+    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-amd64.deb
+    ```
+
+    ```bash TAR (通用)
+    # 通用 tar.gz 包
+    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-linux-x86_64.tar.gz
+    tar xzvf filebeat-8.13.0-linux-x86_64.tar.gz
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="安装软件包">
+    <CodeGroup>
+
+    ```bash RPM
+    sudo rpm -vi filebeat-8.13.0-x86_64.rpm
+    ```
+
+    ```bash DEB
+    sudo dpkg -i filebeat-8.13.0-amd64.deb
+    ```
+
+    </CodeGroup>
+
+    安装完成后，主要文件路径如下：
+
+    | 路径 | 说明 |
+    |------|------|
+    | `/etc/filebeat/filebeat.yml` | 主配置文件 |
+    | `/var/lib/filebeat/` | 数据目录（存储读取进度） |
+    | `/var/log/filebeat/` | Filebeat 自身日志 |
+    | `/usr/share/filebeat/` | 程序目录 |
+  </Step>
+
+  <Step title="验证安装">
+    执行以下命令确认安装成功：
+
+    ```bash
+    filebeat version
+    # 输出示例：filebeat version 8.13.0 (amd64), libbeat 8.13.0
+    ```
+  </Step>
+
+  <Step title="配置系统服务">
+    将 Filebeat 设置为系统服务并启用开机自启：
+
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable filebeat
+    ```
+
+    <Tip>
+      暂不启动服务，等完成配置文件编辑后再启动，参见[配置 Filebeat](/collection/filebeat-config)。
+    </Tip>
+  </Step>
+</Steps>
+
+## 验证网络连通性
+
+安装完成后，测试到 Kafka 的网络连通性：
+
+```bash
+# 测试 Kafka Broker 连通性（替换为实际 Broker 地址）
+telnet kafka-broker1 9092
+# 或者
+nc -zv kafka-broker1 9092
+```
+
+如果连通性测试失败，请检查：
+- 防火墙规则是否放行 9092 端口
+- 安全组或 iptables 配置
+- Kafka Broker 地址是否正确
+
+## 卸载 Filebeat
+
+如需卸载 Filebeat，执行以下命令：
+
+<CodeGroup>
+
+```bash RPM
+sudo systemctl stop filebeat
+sudo rpm -e filebeat
+```
+
+```bash DEB
+sudo systemctl stop filebeat
+sudo dpkg -r filebeat
+```
+
+</CodeGroup>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="配置 Filebeat" icon="gear" href="/collection/filebeat-config">
+    配置日志输入路径和 Kafka 输出参数
+  </Card>
+  <Card title="Kafka 接入配置" icon="arrows-left-right" href="/collection/kafka-integration">
+    了解 Kafka Topic 规范与接入要求
+  </Card>
+</CardGroup>

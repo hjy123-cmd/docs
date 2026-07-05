@@ -1,0 +1,94 @@
+---
+title: "Kibana 使用指南：日志检索与可视化平台入门"
+sidebarTitle: "Kibana 概览"
+description: "了解 Kibana 的核心功能模块，包括 Discover 日志检索、Dashboard 可视化和 Dev Tools，快速掌握日志平台使用方法。"
+---
+
+Kibana 是日志监控平台的 Web 可视化界面，基于 Elasticsearch 提供强大的日志检索、数据分析和可视化大屏功能。通过 Kibana，您可以快速定位业务日志、分析异常趋势，并构建实时监控大屏。
+
+## 登录 Kibana
+
+使用平台管理员提供的地址和账号登录 Kibana：
+
+1. 在浏览器中打开 Kibana 访问地址（通常为 `http://kibana.your-domain.com`）
+2. 输入您的用户名和密码
+3. 点击 **Log in** 进入主界面
+
+<Note>
+  首次登录后建议修改默认密码。如忘记密码或账号被锁定，请联系平台管理员。
+</Note>
+
+## 核心功能模块
+
+<CardGroup cols={2}>
+  <Card title="Discover" icon="magnifying-glass">
+    原始日志检索与浏览。支持全文搜索、KQL 查询语言、字段过滤和时间范围选择。
+  </Card>
+  <Card title="Dashboard" icon="chart-bar">
+    可视化大屏，将多个图表组合展示，支持实时刷新和时间联动。
+  </Card>
+  <Card title="Visualize" icon="chart-line">
+    图表编辑器，创建柱状图、折线图、饼图、热力图等各类可视化组件。
+  </Card>
+  <Card title="Dev Tools" icon="code">
+    直接执行 Elasticsearch API 请求，适合高级查询和索引管理操作。
+  </Card>
+</CardGroup>
+
+## 配置索引模式（Index Pattern）
+
+首次使用前，需要创建索引模式以便 Kibana 识别日志数据：
+
+<Steps>
+  <Step title="进入 Stack Management">
+    点击左侧导航栏底部的 **Stack Management（设置）** 图标。
+  </Step>
+  <Step title="创建数据视图">
+    在 **Kibana** → **数据视图** 中点击 **创建数据视图**。
+  </Step>
+  <Step title="配置索引模式">
+    填写以下信息：
+    - **名称**：`logs-*`（匹配所有日志索引）
+    - **索引模式**：`logs-*`
+    - **时间字段**：选择 `@timestamp`
+
+    点击 **保存数据视图到 Kibana**。
+  </Step>
+  <Step title="验证数据">
+    进入 **Discover**，选择刚创建的 `logs-*` 数据视图，确认日志条目出现在列表中。
+  </Step>
+</Steps>
+
+## 界面布局说明
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  时间范围选择器        KQL 搜索栏           刷新按钮         │
+├──────────┬──────────────────────────────────────────────────┤
+│          │  时间直方图（日志量趋势）                          │
+│  字段列表  ├──────────────────────────────────────────────────┤
+│  (左侧)   │  日志列表（每行一条日志）                          │
+│          │    ▶ 展开查看完整字段                              │
+└──────────┴──────────────────────────────────────────────────┘
+```
+
+## 常用快捷操作
+
+| 操作 | 方法 |
+|------|------|
+| 展开日志详情 | 点击日志行左侧的 **▶** 箭头 |
+| 按字段值过滤 | 点击字段值旁的 **+** （包含）或 **-** （排除）图标 |
+| 设置显示列 | 在左侧字段列表中点击字段名称旁的 **+** |
+| 分享当前查询 | 点击顶部 **Share** → **Copy link** |
+| 保存查询 | 点击 **Save** 保存为已保存搜索 |
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="日志检索详解" icon="magnifying-glass" href="/visualization/log-search">
+    学习 KQL 查询语法和高级搜索技巧
+  </Card>
+  <Card title="构建监控大屏" icon="chart-bar" href="/visualization/dashboards">
+    创建和管理日志可视化仪表板
+  </Card>
+</CardGroup>

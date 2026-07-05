@@ -1,13 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
+  "projectType": "infrastructure",
+  "projectName": "日志监控平台",
+  "projectDescription": "基于 ELK + Kafka + Prometheus/Grafana 构建的企业级日志采集、处理、存储与监控告警一体化平台。",
   "theme": "aspen",
-  "name": "日志监控平台",
-  "colors": {
-    "primary": "#ef7025",
-    "light": "#eec9bc",
-    "dark": "#4fa1ab"
-  },
-  "favicon": "/favicon.svg",
+  "primaryColor": "#ef7025",
+  "lightColor": "#eec9bc",
+  "darkColor": "#4fa1ab",
   "navigation": {
     "tabs": [
       {
@@ -66,14 +64,25 @@
       }
     ]
   },
-  "navbar": {
-    "primary": {
-      "type": "button",
-      "label": "进入平台",
-      "href": "https://kibana.example.com"
-    }
-  },
-  "footer": {
-    "socials": {}
-  }
+  "keyFeatures": [
+    "Filebeat 自动化日志采集（支持 30+ 业务系统）",
+    "Kafka 集群高可用消息缓冲（KRaft 模式）",
+    "Logstash 日志过滤与脱敏处理",
+    "Elasticsearch 集群冷热数据分离存储",
+    "ILM 生命周期自动管理与快照备份",
+    "Kibana 日志检索与可视化大屏",
+    "Prometheus + Grafana 统一监控观测",
+    "Alertmanager 多渠道告警（企业微信 / 邮件 / 短信）"
+  ],
+  "publicApiSurface": [
+    "Filebeat HTTP Metrics :5066",
+    "Kafka Broker TCP :9092",
+    "Elasticsearch REST API",
+    "Kibana Web UI",
+    "Prometheus Metrics :9100 (Node Exporter)",
+    "Prometheus Metrics :9308 (Kafka Exporter)",
+    "Prometheus Metrics :9114 (Elasticsearch Exporter)",
+    "Grafana Web UI",
+    "Alertmanager Webhook / 企业微信 / 邮件 / 短信"
+  ]
 }

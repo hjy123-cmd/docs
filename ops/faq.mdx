@@ -1,0 +1,162 @@
+---
+title: "常见问题 FAQ：日志监控平台使用指南"
+sidebarTitle: "常见问题"
+description: "解答日志监控平台用户最常见的问题，涵盖接入规范、日志保留期限、数据安全、查询权限和告警配置。"
+---
+
+本文汇集了日志监控平台用户最常问到的问题和解答，帮助您快速找到所需信息。
+
+## 接入与配置
+
+<Accordion title="如何让我的应用日志接入平台？">
+  按照以下步骤完成接入：
+  1. 联系平台管理员获取 Kafka Broker 地址和接入权限
+  2. 按照[安装 Filebeat](/collection/filebeat-install) 文档在您的服务器上安装 Filebeat
+  3. 按照[配置 Filebeat](/collection/filebeat-config) 文档配置日志路径和 Kafka 输出
+  4. 启动 Filebeat 服务，约 1–2 分钟后在 Kibana 中验证日志
+
+  整个接入过程预计 15–30 分钟。
+</Accordion>
+
+<Accordion title="支持哪些日志格式？">
+  平台支持任何以文件形式输出的日志，包括：
+  - **纯文本日志**：每行一条，直接存储为 `message` 字段
+  - **JSON 格式日志**：字段自动解析，推荐使用
+  - **多行日志**（如 Java 堆栈）：通过 Filebeat `multiline` 配置合并为单条
+  - **Nginx/Apache Access Log**：通过 Logstash Grok 规则解析为结构化字段
+
+  如果您的日志格式特殊，联系平台管理员配置专属 Logstash Pipeline。
+</Accordion>
+
+<Accordion title="我可以指定日志写入哪个 Topic 吗？">
+  Topic 名称由 Filebeat 配置中的 `service` 字段自动生成，规则为 `logs-{service}`。
+  例如，设置 `service: order-service` 则日志写入 `logs-order-service` Topic。
+
+  不支持自定义 Topic 前缀，前缀 `logs-` 是 Logstash 自动订阅的必要条件。
+</Accordion>
+
+<Accordion title="一台服务器上可以运行多个 Filebeat 实例吗？">
+  不推荐。一台服务器上运行一个 Filebeat 实例即可，通过配置多个 `inputs` 来采集不同应用的日志。
+  多个 Filebeat 实例会消耗更多资源，且共享端口（5066）会产生冲突。
+</Accordion>
+
+## 数据保留与存储
+
+<Accordion title="日志数据保留多长时间？">
+  默认保留策略（可根据服务需求调整）：
+
+  | 阶段 | 时间 | 存储类型 |
+  |------|------|----------|
+  | 热数据（快速查询） | 0–7 天 | SSD 热节点 |
+  | 温数据（普通查询） | 7–30 天 | HDD 温节点 |
+  | 冷数据（归档） | 30–90 天 | 冷节点/快照 |
+  | 自动删除 | 90 天后 | — |
+
+  如果您的业务有合规要求（如审计日志需保留 180 天），请联系平台管理员为您配置专属保留策略。
+</Accordion>
+
+<Accordion title="日志数据有备份吗？">
+  是的。Elasticsearch 配置了定时快照策略（SLM），每天凌晨自动将日志索引备份到 NFS/对象存储，快照保留 30 天。
+  如需从快照恢复特定时间段的历史数据，请联系平台管理员。
+</Accordion>
+
+<Accordion title="日志占用多大存储空间？">
+  存储空间消耗因日志量和压缩率而异。通常：
+  - Elasticsearch 开启 `best_compression` 压缩后，原始日志压缩比约为 5:1
+  - 例如每天产生 100 GB 原始日志，实际 ES 存储约 20 GB
+  - 冷热分离策略将大部分数据迁移到低成本存储，降低整体存储费用
+
+  如需了解您的服务当前存储占用量，可在 Kibana Dev Tools 中执行：
+  ```json
+  GET _cat/indices/logs-your-service-*?v&h=index,store.size&s=store.size:desc
+  ```
+</Accordion>
+
+## 查询与权限
+
+<Accordion title="Kibana 账号如何申请？">
+  请联系平台管理员申请 Kibana 账号，提供以下信息：
+  - 姓名和邮箱
+  - 所属团队
+  - 需要访问的日志服务范围（如仅访问 `logs-order-*`）
+
+  管理员会根据最小权限原则为您分配访问权限。
+</Accordion>
+
+<Accordion title="我能看到其他团队的日志吗？">
+  默认情况下，每个账号仅能查询分配给其访问权限的索引。
+  如需跨团队协作查看日志（如联合排查问题），请联系平台管理员申请临时权限扩展。
+</Accordion>
+
+<Accordion title="KQL 查询很慢，如何优化？">
+  以下做法可显著提升查询速度：
+  1. **缩小时间范围**：优先查询热数据（7 天内）
+  2. **使用精确字段匹配**：`service: order-service` 比全文搜索快
+  3. **避免前缀通配符**：`*keyword` 会触发全索引扫描
+  4. **增加过滤条件**：先用 `level: ERROR` 缩小范围再搜索关键词
+  5. **使用 .keyword 字段**：对于精确匹配，使用 `service.keyword` 而非 `service`
+</Accordion>
+
+## 数据安全
+
+<Accordion title="日志中的敏感信息如何处理？">
+  Logstash 在写入 Elasticsearch 之前会对日志中的常见敏感信息进行自动脱敏：
+  - 手机号：`138****8888`
+  - 身份证号：`410***********1234`
+  - 银行卡号：`6222***********1234`
+
+  如果您的应用日志中包含其他类型的敏感数据，请联系平台管理员添加专属脱敏规则。建议在应用层面也做好日志脱敏处理，不要将敏感信息写入日志。
+</Accordion>
+
+<Accordion title="Filebeat 传输日志是否加密？">
+  目前 Filebeat 到 Kafka 的传输使用明文 TCP 连接，仅在内网环境中运行。如果您的应用部署在需要加密传输的环境（如跨数据中心），请联系平台管理员启用 TLS 加密配置。
+</Accordion>
+
+## 监控与告警
+
+<Accordion title="如何为我的服务添加自定义告警？">
+  目前告警规则由平台管理员统一管理。如需为特定服务添加自定义告警（如某服务错误日志量超过阈值），请联系平台管理员提供以下信息：
+  - 服务名称和索引名称（如 `logs-order-service`）
+  - 告警条件（如：5 分钟内 ERROR 日志超过 100 条）
+  - 通知渠道（企业微信群、邮件地址）
+  - 告警接收人
+</Accordion>
+
+<Accordion title="告警太多，如何减少打扰？">
+  可以申请配置以下策略来减少告警：
+  - **告警静默**：在已知维护窗口期间临时屏蔽特定告警
+  - **调整阈值**：提高告警触发阈值，减少误报
+  - **调整 repeat_interval**：降低相同告警的重复通知频率
+  - **告警分级**：将低优先级告警仅发邮件，不发企业微信
+
+  联系平台管理员并说明您的需求。
+</Accordion>
+
+<Accordion title="如何查看历史告警记录？">
+  Alertmanager 本身不保存告警历史，可以通过以下方式查看历史告警：
+  1. **Grafana AlertManager**：如果启用了 Grafana 告警历史，可在 Grafana → Alerting → Alert rules 中查看
+  2. **企业微信/邮件归档**：查看企业微信群聊记录或邮件收件箱
+  3. **Prometheus 查询**：通过 `ALERTS_FOR_STATE` 指标查询历史告警时间
+</Accordion>
+
+## 技术支持
+
+<Accordion title="遇到问题应该联系谁？">
+  请按以下渠道反馈：
+  1. **查阅文档**：先查阅[排查指南](/ops/troubleshooting)中的常见问题
+  2. **联系平台管理员**：通过内部企业微信群或工单系统提交问题
+  3. **紧急故障**：对于生产环境严重故障（ES 集群 Red、大量日志丢失等），直接联系值班运维
+
+  提交问题时请附上：故障现象、发生时间、相关日志截图和已排查的步骤。
+</Accordion>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="排查指南" icon="wrench" href="/ops/troubleshooting">
+    详细的故障排查步骤和解决方法
+  </Card>
+  <Card title="快速开始" icon="rocket" href="/quickstart">
+    重新查阅快速接入指南
+  </Card>
+</CardGroup>

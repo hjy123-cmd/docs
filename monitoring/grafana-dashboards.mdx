@@ -1,0 +1,118 @@
+---
+title: "Grafana 监控大屏：查看和使用统一观测仪表板"
+sidebarTitle: "Grafana 大屏"
+description: "使用 Grafana 统一监控大屏查看日志平台各组件的实时运行指标，包括节点健康、Kafka 状态和 Elasticsearch 性能。"
+---
+
+Grafana 是日志监控平台的统一可观测大屏，整合来自 Prometheus 的所有组件指标，提供实时、可交互的监控视图。本文介绍如何使用 Grafana 查看平台各层的运行状态。
+
+## 登录 Grafana
+
+使用平台管理员提供的地址和账号登录 Grafana：
+
+1. 在浏览器打开 Grafana 访问地址（通常为 `http://grafana.your-domain.com`）
+2. 输入用户名和密码登录
+3. 首页显示 **Home Dashboard** 或大屏列表
+
+## 平台预置大屏
+
+日志监控平台预置了以下 Grafana 大屏，可在 **Dashboards** → **Browse** 中找到：
+
+| 大屏名称 | 内容 | 更新频率 |
+|----------|------|----------|
+| **Log Platform Overview** | 平台整体健康状态总览 | 30s |
+| **Node Health** | 所有服务器 CPU、内存、磁盘使用率 | 15s |
+| **Kafka Cluster** | Kafka Broker 状态、消费延迟、Topic 吞吐量 | 15s |
+| **Elasticsearch Cluster** | ES 集群健康、索引大小、JVM 内存、查询性能 | 30s |
+| **Filebeat Agents** | 各服务器 Filebeat 采集速率和发布状态 | 30s |
+
+## 使用大屏
+
+### 时间范围控制
+
+大屏右上角的时间选择器控制所有面板显示的时间范围：
+
+- 点击预设值（如 `Last 1h`）快速切换
+- 点击时间范围文本可输入自定义时间
+- 点击 🔄 按钮旁的 **▼** 设置自动刷新间隔
+
+### 变量过滤
+
+大屏顶部的下拉菜单（变量）用于过滤特定节点、服务或环境：
+
+- **Instance**：选择特定服务器节点
+- **Job**：选择特定 Exporter 类型
+- 选择 `All` 显示所有实例的聚合数据
+
+### 放大面板
+
+点击任意面板标题旁的 **⤢** 图标可全屏查看该面板，按 `Esc` 退出全屏。
+
+## 关键监控指标说明
+
+### Kafka 消费延迟面板
+
+**指标**：`kafka_consumergroup_lag`
+
+| 数值范围 | 状态 | 建议 |
+|----------|------|------|
+| 0 – 1000 | 正常 | 无需操作 |
+| 1000 – 10000 | 注意 | 观察是否持续增长 |
+| > 10000 | 告警 | 检查 Logstash 消费能力 |
+| > 100000 | 严重 | 立即扩容 Logstash Worker |
+
+### Elasticsearch 集群健康面板
+
+颜色指示集群状态：
+- 🟢 **Green**：所有分片正常
+- 🟡 **Yellow**：副本分片未分配（不影响数据完整性）
+- 🔴 **Red**：主分片未分配（数据可能不完整）
+
+### 节点磁盘使用率面板
+
+磁盘使用率超过 **80%** 时应关注，超过 **90%** 时告警会自动触发。
+
+## 创建自定义面板
+
+<Steps>
+  <Step title="进入编辑模式">
+    打开一个大屏，点击右上角 **Edit** 按钮（需要 Editor 或 Admin 权限）。
+  </Step>
+  <Step title="添加新面板">
+    点击 **Add** → **Visualization** 添加新面板。
+  </Step>
+  <Step title="配置数据源">
+    在 **Data source** 下拉中选择 **Prometheus**，在查询框中输入 PromQL 表达式。
+  </Step>
+  <Step title="选择图表类型">
+    在右侧面板类型选择器中选择 Time series、Gauge、Stat 等图表类型。
+  </Step>
+  <Step title="保存">
+    点击 **Apply** 保存面板，回到大屏编辑模式后再次点击 **Save dashboard**。
+  </Step>
+</Steps>
+
+## 设置大屏告警
+
+Grafana 支持直接在面板上配置告警规则：
+
+1. 打开面板编辑界面，切换到 **Alert** 标签页
+2. 点击 **Create alert rule from this panel**
+3. 配置告警条件（如指标超过阈值）
+4. 选择通知渠道（Alertmanager 或 Grafana 内置联系点）
+5. 保存告警规则
+
+<Tip>
+  建议优先通过 Prometheus Alertmanager 统一管理告警，而非分散在 Grafana 各面板中，便于集中维护和告警去重。
+</Tip>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="Alertmanager 配置" icon="bell" href="/monitoring/alertmanager-config">
+    配置告警路由规则和静默策略
+  </Card>
+  <Card title="通知渠道配置" icon="envelope" href="/monitoring/notification-channels">
+    设置企业微信、邮件和短信告警通知
+  </Card>
+</CardGroup>

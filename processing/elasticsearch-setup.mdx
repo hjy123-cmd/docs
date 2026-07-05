@@ -1,0 +1,176 @@
+---
+title: "Elasticsearch 配置：索引模板与集群存储策略"
+sidebarTitle: "Elasticsearch 配置"
+description: "为日志监控平台配置 Elasticsearch 索引模板、字段映射和集群存储策略，优化查询性能与存储成本。"
+---
+
+Elasticsearch 是日志监控平台的核心存储引擎，负责日志数据的持久化和全文检索。合理配置索引模板（Index Template）和字段映射（Mapping）能够显著提升查询性能并降低存储成本。本文介绍平台中 Elasticsearch 的关键配置方法。
+
+## 索引命名规范
+
+平台日志索引遵循以下命名模式：
+
+```
+logs-{service}-{YYYY.MM.dd}
+```
+
+**示例：**
+- `logs-order-service-2024.01.15`
+- `logs-payment-api-2024.01.15`
+- `logs-nginx-2024.01.15`
+
+## 创建索引模板
+
+使用 Kibana Dev Tools 或 Elasticsearch API 创建通配索引模板：
+
+```json 创建索引模板
+PUT _index_template/logs-template
+{
+  "index_patterns": ["logs-*"],
+  "priority": 100,
+  "template": {
+    "settings": {
+      "number_of_shards": 3,
+      "number_of_replicas": 1,
+      "index.refresh_interval": "5s",
+      "index.max_result_window": 50000,
+      "index.codec": "best_compression"
+    },
+    "mappings": {
+      "dynamic": true,
+      "dynamic_templates": [
+        {
+          "strings_as_keyword": {
+            "match_mapping_type": "string",
+            "mapping": {
+              "type": "text",
+              "fields": {
+                "keyword": {
+                  "type": "keyword",
+                  "ignore_above": 256
+                }
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "message": { "type": "text", "analyzer": "standard" },
+        "level": { "type": "keyword" },
+        "service": { "type": "keyword" },
+        "env": { "type": "keyword" },
+        "host": {
+          "properties": {
+            "name": { "type": "keyword" }
+          }
+        },
+        "logger": { "type": "keyword" },
+        "log_message": { "type": "text" }
+      }
+    }
+  }
+}
+```
+
+## 关键配置说明
+
+<Accordion title="分片数量（number_of_shards）">
+  分片数量在创建索引后无法修改。日志索引建议遵循以下原则：
+  - 每个分片的数据量控制在 10–50 GB
+  - 分片数量 = 预期每日数据量(GB) / 30 GB（取整后向上取偶数）
+  - 例如：预期每天 90 GB 日志 → 设置 3 个分片
+</Accordion>
+
+<Accordion title="副本数量（number_of_replicas）">
+  - 生产环境建议设置为 1（即 1 主 + 1 副本）
+  - 单节点测试环境设置为 0
+  - 增加副本数可提升读取吞吐量，但会占用额外存储空间
+</Accordion>
+
+<Accordion title="刷新间隔（index.refresh_interval）">
+  - 默认值 1s：日志写入 1 秒后可被搜索
+  - 建议设置为 5s：减少小段合并频率，提升写入性能
+  - 批量数据导入时可临时设置为 `-1` 关闭自动刷新
+</Accordion>
+
+## 索引滚动配置（Rollover）
+
+为大流量服务配置索引自动滚动，避免单个索引过大：
+
+```json 创建滚动别名
+PUT logs-order-service-000001
+{
+  "aliases": {
+    "logs-order-service": {
+      "is_write_index": true
+    }
+  }
+}
+```
+
+```json ILM 触发滚动条件
+# 在 ILM 策略中配置（详见 ILM 策略文档）
+"rollover": {
+  "max_size": "50gb",
+  "max_age": "1d",
+  "max_docs": 100000000
+}
+```
+
+## 集群健康状态检查
+
+在 Kibana Dev Tools 中运行以下命令查看集群状态：
+
+```json 集群健康状态
+GET _cluster/health
+```
+
+```json 响应示例
+{
+  "cluster_name": "log-platform",
+  "status": "green",
+  "number_of_nodes": 6,
+  "number_of_data_nodes": 6,
+  "active_primary_shards": 150,
+  "active_shards": 300,
+  "relocating_shards": 0,
+  "initializing_shards": 0,
+  "unassigned_shards": 0
+}
+```
+
+| 状态 | 含义 |
+|------|------|
+| `green` | 所有分片（主 + 副本）正常分配 |
+| `yellow` | 主分片正常，部分副本分片未分配 |
+| `red` | 存在主分片未分配，数据可能不完整 |
+
+<Warning>
+  集群状态为 `red` 时需要立即排查。请联系平台管理员，并查阅[排查指南](/ops/troubleshooting)。
+</Warning>
+
+## 常用索引管理操作
+
+```json 查询索引列表（按大小排序）
+GET _cat/indices/logs-*?v&s=store.size:desc
+```
+
+```json 查看索引分片分布
+GET _cat/shards/logs-order-service-*?v
+```
+
+```json 手动关闭冷数据索引
+POST logs-order-service-2024.01.01/_close
+```
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="ILM 生命周期策略" icon="clock" href="/processing/ilm-policy">
+    配置数据冷热分离与自动过期删除
+  </Card>
+  <Card title="快照备份" icon="floppy-disk" href="/processing/snapshot-backup">
+    配置定时快照保障数据安全
+  </Card>
+</CardGroup>

@@ -1,0 +1,186 @@
+---
+title: "ILM 索引生命周期策略：冷热数据分离与自动过期"
+sidebarTitle: "ILM 策略"
+description: "使用 Elasticsearch ILM 策略为日志数据配置热-温-冷三阶段冷热分离，自动管理数据迁移和过期删除。"
+---
+
+Elasticsearch 索引生命周期管理（ILM）策略让日志数据根据时间自动在热节点、温节点和冷节点之间迁移，在保障近期日志查询性能的同时，显著降低历史数据的存储成本。本文介绍如何在日志监控平台中配置和使用 ILM 策略。
+
+## 数据生命周期阶段
+
+平台默认的日志数据生命周期分为三个阶段：
+
+| 阶段 | 时间范围 | 存储节点 | 操作 |
+|------|----------|----------|------|
+| **Hot（热）** | 0 – 7 天 | 高性能 SSD 节点 | 支持写入和高速读取 |
+| **Warm（温）** | 7 – 30 天 | 普通 HDD 节点 | 只读，Force Merge 合并段 |
+| **Cold（冷）** | 30 – 90 天 | 低成本节点 | 只读，索引冻结 |
+| **Delete（删除）** | 90 天后 | — | 自动删除索引 |
+
+## 创建 ILM 策略
+
+在 Kibana Dev Tools 中执行以下请求创建默认日志 ILM 策略：
+
+```json 创建 ILM 策略
+PUT _ilm/policy/logs-default-policy
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_size": "50gb",
+            "max_age": "1d",
+            "max_docs": 100000000
+          },
+          "set_priority": {
+            "priority": 100
+          }
+        }
+      },
+      "warm": {
+        "min_age": "7d",
+        "actions": {
+          "set_priority": {
+            "priority": 50
+          },
+          "allocate": {
+            "require": {
+              "data": "warm"
+            }
+          },
+          "forcemerge": {
+            "max_num_segments": 1
+          },
+          "readonly": {}
+        }
+      },
+      "cold": {
+        "min_age": "30d",
+        "actions": {
+          "set_priority": {
+            "priority": 0
+          },
+          "allocate": {
+            "require": {
+              "data": "cold"
+            }
+          },
+          "freeze": {}
+        }
+      },
+      "delete": {
+        "min_age": "90d",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}
+```
+
+## 查看策略状态
+
+```json 查看现有 ILM 策略
+GET _ilm/policy/logs-default-policy
+```
+
+```json 查看索引的 ILM 执行状态
+GET logs-order-service-*/_ilm/explain
+```
+
+响应中的 `phase`、`action`、`step` 字段指示索引当前所在的生命周期阶段：
+
+```json 响应示例（部分）
+{
+  "indices": {
+    "logs-order-service-2024.01.08": {
+      "index": "logs-order-service-2024.01.08",
+      "managed": true,
+      "policy": "logs-default-policy",
+      "phase": "warm",
+      "action": "complete",
+      "step": "complete",
+      "phase_time_millis": 1704672000000,
+      "age": "7d"
+    }
+  }
+}
+```
+
+## 自定义保留策略
+
+不同服务的日志可能有不同的保留要求。为特定服务创建专属 ILM 策略：
+
+```json 长期保留策略（180天）
+PUT _ilm/policy/logs-audit-policy
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_size": "50gb",
+            "max_age": "1d"
+          }
+        }
+      },
+      "warm": {
+        "min_age": "7d",
+        "actions": {
+          "allocate": { "require": { "data": "warm" } },
+          "forcemerge": { "max_num_segments": 1 },
+          "readonly": {}
+        }
+      },
+      "cold": {
+        "min_age": "30d",
+        "actions": {
+          "allocate": { "require": { "data": "cold" } },
+          "freeze": {}
+        }
+      },
+      "delete": {
+        "min_age": "180d",
+        "actions": { "delete": {} }
+      }
+    }
+  }
+}
+```
+
+<Tip>
+  审计日志（如登录记录、操作日志）通常需要保留 180 天以满足合规要求，建议为这类日志单独配置 `logs-audit-policy`。
+</Tip>
+
+## 修改现有策略
+
+直接重新执行 `PUT _ilm/policy/{policy_name}` 请求即可更新策略，新策略会在下次 ILM 轮询时（默认 10 分钟）生效。
+
+<Warning>
+  修改删除阶段的 `min_age` 参数时，已进入删除队列的索引不受新策略影响。建议在非业务高峰期修改策略。
+</Warning>
+
+## 节点标签配置
+
+ILM 策略中的 `allocate.require` 依赖 Elasticsearch 节点的属性标签。确认节点已正确配置：
+
+```json 查看节点属性
+GET _cat/nodeattrs?v&h=node,attr,value
+```
+
+预期输出中，热节点应有 `data=hot`，温节点有 `data=warm`，冷节点有 `data=cold` 属性。
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="快照备份" icon="floppy-disk" href="/processing/snapshot-backup">
+    配置定时快照备份冷数据或归档数据
+  </Card>
+  <Card title="Kibana 日志检索" icon="magnifying-glass" href="/visualization/log-search">
+    使用 Kibana 检索和分析各阶段的日志数据
+  </Card>
+</CardGroup>

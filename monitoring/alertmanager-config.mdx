@@ -1,0 +1,146 @@
+---
+title: "Alertmanager 配置：告警路由规则与静默策略"
+sidebarTitle: "Alertmanager"
+description: "配置 Alertmanager 的告警路由规则、分组策略、抑制规则和静默功能，实现智能告警分发与降噪。"
+---
+
+Alertmanager 负责接收来自 Prometheus 的告警，按照路由规则将告警分发到企业微信、邮件或短信等通知渠道。合理配置路由规则可以避免告警风暴，确保关键告警及时送达。本文介绍 Alertmanager 的核心配置方法。
+
+## 配置文件结构
+
+Alertmanager 的主配置文件通常位于 `/etc/alertmanager/alertmanager.yml`，包含以下核心部分：
+
+```yaml
+global:         # 全局配置（SMTP、企业微信等认证信息）
+route:          # 告警路由规则（决定告警发往哪个 receiver）
+receivers:      # 通知渠道定义（企业微信、邮件、短信等）
+inhibit_rules:  # 抑制规则（避免重复告警）
+```
+
+## 基础路由配置
+
+```yaml /etc/alertmanager/alertmanager.yml lines
+global:
+  resolve_timeout: 5m
+
+route:
+  # 默认接收者
+  receiver: 'default-receiver'
+  # 告警分组依据：按 alertname 和 env 分组
+  group_by: ['alertname', 'env']
+  # 同一分组内，首次告警等待 30s 再发送（等待同组其他告警一起发送）
+  group_wait: 30s
+  # 同一分组的后续告警，每 5 分钟发送一次
+  group_interval: 5m
+  # 已发送的告警，每 4 小时重复提醒一次
+  repeat_interval: 4h
+
+  routes:
+    # Critical 级别告警 → 企业微信
+    - match:
+        severity: critical
+      receiver: 'wechat-critical'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Warning 级别告警 → 邮件
+    - match:
+        severity: warning
+      receiver: 'email-warning'
+      group_wait: 1m
+      repeat_interval: 4h
+
+receivers:
+  - name: 'default-receiver'
+    # 默认接收者可以为空（丢弃）或发往邮件
+    email_configs:
+      - to: 'ops-team@your-company.com'
+
+  - name: 'wechat-critical'
+    webhook_configs:
+      - url: 'http://wechat-webhook:8080/send'
+        send_resolved: true
+
+  - name: 'email-warning'
+    email_configs:
+      - to: 'ops-team@your-company.com'
+        send_resolved: true
+```
+
+## 告警分组策略
+
+合理的分组策略可以有效减少告警数量：
+
+| 参数 | 作用 | 建议值 |
+|------|------|--------|
+| `group_by` | 哪些标签相同的告警合并为一组 | `['alertname', 'env']` |
+| `group_wait` | 等待多长时间后发送组内第一条告警 | `30s` |
+| `group_interval` | 组内新告警追加发送的间隔 | `5m` |
+| `repeat_interval` | 告警持续时，多久重复通知一次 | `4h`（critical: 1h） |
+
+## 抑制规则
+
+抑制规则防止级联告警（例如：节点宕机已触发，避免该节点上所有服务的告警重复发送）：
+
+```yaml /etc/alertmanager/alertmanager.yml
+inhibit_rules:
+  # 如果 NodeDown（critical）触发，抑制同节点的其他 warning 告警
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['instance']
+
+  # 如果 ES 集群 RED，抑制 ES 集群 YELLOW 告警
+  - source_match:
+      alertname: 'ElasticsearchClusterRed'
+    target_match:
+      alertname: 'ElasticsearchClusterYellow'
+    equal: ['cluster']
+```
+
+## 使用静默（Silence）
+
+在 Alertmanager Web UI 或通过 API 创建静默规则，在维护窗口期间临时屏蔽特定告警：
+
+### 通过 Web UI 创建静默
+
+1. 打开 Alertmanager Web UI（通常为 `http://alertmanager:9093`）
+2. 点击 **Silences** → **New Silence**
+3. 配置匹配条件（如 `instance=app-server-01`）
+4. 设置静默时间段和备注（说明维护原因）
+5. 点击 **Create** 生效
+
+### 通过 API 创建静默
+
+```bash
+curl -X POST http://alertmanager:9093/api/v2/silences \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "matchers": [
+      {"name": "instance", "value": "app-server-01", "isRegex": false}
+    ],
+    "startsAt": "2024-01-15T22:00:00Z",
+    "endsAt": "2024-01-16T02:00:00Z",
+    "createdBy": "ops-admin",
+    "comment": "Scheduled maintenance"
+  }'
+```
+
+## 查看告警状态
+
+在 Alertmanager Web UI 中：
+- **Alerts**：当前活跃的告警列表，按接收者分组
+- **Silences**：当前生效的静默规则
+- **Status**：Alertmanager 集群状态和配置信息
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="通知渠道配置" icon="envelope" href="/monitoring/notification-channels">
+    配置企业微信、邮件和短信通知
+  </Card>
+  <Card title="排查问题" icon="wrench" href="/ops/troubleshooting">
+    排查告警不触发或通知未送达等问题
+  </Card>
+</CardGroup>

@@ -1,0 +1,263 @@
+---
+title: "配置 Filebeat：日志输入、过滤与 Kafka 输出设置"
+sidebarTitle: "Filebeat 配置"
+description: "配置 Filebeat 的日志输入路径、多行合并、字段处理器和 Kafka 输出，实现生产级日志采集。"
+---
+
+Filebeat 的核心配置文件位于 `/etc/filebeat/filebeat.yml`，包含日志输入（Inputs）、处理器（Processors）和输出（Output）三个主要部分。本文介绍各配置项的含义和最佳实践，帮助您根据实际业务需求完成配置。
+
+## 配置文件结构
+
+一个完整的 Filebeat 配置文件由以下部分组成：
+
+```yaml /etc/filebeat/filebeat.yml
+filebeat.inputs:      # 定义日志来源
+processors:           # 字段处理与过滤（可选）
+output.kafka:         # 输出到 Kafka
+logging:              # Filebeat 自身日志配置
+http:                 # HTTP 监控端点配置
+```
+
+## 配置日志输入
+
+### 基础配置
+
+```yaml /etc/filebeat/filebeat.yml lines
+filebeat.inputs:
+  - type: log
+    enabled: true
+    # 日志文件路径，支持通配符
+    paths:
+      - /var/log/your-app/*.log
+      - /var/log/your-app/error.log
+    # 添加自定义字段，用于在 Kibana 中过滤
+    fields:
+      service: payment-service
+      env: production
+      team: backend
+    fields_under_root: true
+    # 排除包含特定内容的行
+    exclude_lines: ['^DEBUG']
+    # 仅包含包含特定内容的行
+    # include_lines: ['ERR', 'WARN']
+    # 忽略超过 24 小时未修改的文件
+    ignore_older: 24h
+    # 关闭超过 1 小时不活跃的文件句柄
+    close_inactive: 1h
+```
+
+### 多行日志合并
+
+对于 Java 异常堆栈等多行日志，使用 `multiline` 配置将相关行合并为一条记录：
+
+```yaml /etc/filebeat/filebeat.yml
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/java-app/*.log
+    fields:
+      service: order-service
+    fields_under_root: true
+    # 以日期时间开头的行作为新日志的起始行
+    multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
+    multiline.negate: true
+    multiline.match: after
+    multiline.max_lines: 500
+    multiline.timeout: 5s
+```
+
+<Tip>
+  `multiline.negate: true` + `multiline.match: after` 表示：不匹配日期时间模式的行追加到前一行之后，即堆栈行附加到日志首行。
+</Tip>
+
+### 多个输入源
+
+可以在同一配置文件中定义多个输入，分别采集不同应用的日志：
+
+```yaml /etc/filebeat/filebeat.yml
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/nginx/access.log
+    fields:
+      service: nginx
+      log_type: access
+    fields_under_root: true
+
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/nginx/error.log
+    fields:
+      service: nginx
+      log_type: error
+    fields_under_root: true
+```
+
+## 配置处理器
+
+处理器（Processors）在将日志发送到 Kafka 之前对字段进行处理：
+
+```yaml /etc/filebeat/filebeat.yml
+processors:
+  # 添加主机信息字段
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  # 添加字段
+  - add_fields:
+      target: ''
+      fields:
+        datacenter: beijing-az1
+  # 删除不需要的字段，减少传输数据量
+  - drop_fields:
+      fields: ["agent.ephemeral_id", "agent.id", "ecs.version"]
+      ignore_missing: true
+  # 截断过长的消息（超过 256KB 的日志行）
+  - truncate_fields:
+      fields:
+        - message
+      max_bytes: 262144
+      fail_on_error: false
+```
+
+## 配置 Kafka 输出
+
+```yaml /etc/filebeat/filebeat.yml
+output.kafka:
+  # Kafka Broker 地址列表（向平台管理员确认）
+  hosts:
+    - "kafka-broker1:9092"
+    - "kafka-broker2:9092"
+    - "kafka-broker3:9092"
+  # Topic 命名规范：logs-{服务名}
+  topic: 'logs-%{[service]}'
+  # 分区策略：hash 保证同一服务的日志有序
+  partition.hash:
+    reachable_only: false
+    hash: ["%{[host.name]}"]
+  # 消息确认级别：1 表示 Leader 确认即可
+  required_acks: 1
+  # 压缩算法
+  compression: gzip
+  # 批量发送配置
+  bulk_max_size: 2048
+  # 消息最大字节数（需与 Kafka 配置一致）
+  max_message_bytes: 1048576
+  # 编码格式
+  codec.json:
+    pretty: false
+    escape_html: false
+```
+
+<Warning>
+  Topic 命名必须遵循平台规范 `logs-{service}`，Logstash 根据此命名模式订阅和路由日志。请勿自行更改 Topic 前缀。
+</Warning>
+
+## 启用 HTTP 监控端点
+
+启用 Filebeat 的 HTTP 监控端点，供 Prometheus 采集运行指标：
+
+```yaml /etc/filebeat/filebeat.yml
+http:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5066
+```
+
+启用后，可通过以下命令查看运行指标：
+
+```bash
+curl http://localhost:5066/stats
+curl http://localhost:5066/info
+```
+
+## 配置自身日志
+
+```yaml /etc/filebeat/filebeat.yml
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat.log
+  keepfiles: 7
+  permissions: 0640
+```
+
+## 完整配置示例
+
+以下是一个生产环境的完整配置示例：
+
+```yaml /etc/filebeat/filebeat.yml lines
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/order-service/*.log
+    fields:
+      service: order-service
+      env: production
+    fields_under_root: true
+    multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+    multiline.negate: true
+    multiline.match: after
+    ignore_older: 24h
+    close_inactive: 1h
+
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  - drop_fields:
+      fields: ["agent.ephemeral_id", "ecs.version"]
+      ignore_missing: true
+
+output.kafka:
+  hosts: ["kafka-broker1:9092", "kafka-broker2:9092", "kafka-broker3:9092"]
+  topic: 'logs-%{[service]}'
+  required_acks: 1
+  compression: gzip
+  codec.json:
+    pretty: false
+
+http:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5066
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat.log
+  keepfiles: 7
+```
+
+## 应用配置
+
+配置完成后，验证并启动服务：
+
+```bash
+# 验证配置语法
+sudo filebeat test config -e
+
+# 测试输出连通性
+sudo filebeat test output -e
+
+# 重启服务使配置生效
+sudo systemctl restart filebeat
+
+# 查看服务日志
+sudo journalctl -u filebeat -f
+```
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="Kafka 接入规范" icon="arrows-left-right" href="/collection/kafka-integration">
+    了解 Kafka Topic 命名规范和分区策略
+  </Card>
+  <Card title="Logstash Pipeline" icon="filter" href="/processing/logstash-pipeline">
+    配置日志解析和 Elasticsearch 写入规则
+  </Card>
+</CardGroup>
